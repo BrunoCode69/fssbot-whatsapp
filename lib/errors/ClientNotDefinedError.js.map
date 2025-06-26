@@ -1,0 +1,1 @@
+{"version":3,"file":"ClientNotDefinedError.js","sourceRoot":"","sources":["../../src/errors/ClientNotDefinedError.ts"],"names":[],"mappings":";;AAAA,MAAM,qBAAsB,SAAQ,KAAK;IACvC;QACE,KAAK,CAAC,oBAAoB,CAAC,CAAC;IAC9B,CAAC;CACF;AAED,kBAAe,qBAAqB,CAAC"}
