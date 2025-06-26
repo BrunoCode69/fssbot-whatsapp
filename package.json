@@ -11,17 +11,6 @@
     "build": "npm i && npm run clean && tsc",
     "clean": "rimraf lib"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Laxeder/rompot.git"
-  },
-  "keywords": [],
-  "author": "Laxeder",
-  "license": "MIT",
-  "bugs": {
-    "url": "https://github.com/Laxeder/rompot/issues"
-  },
-  "homepage": "https://github.com/Laxeder/rompot#readme",
   "dependencies": {
     "@adiwajshing/keyed-db": "0.2.4",
     "@hapi/boom": "9.1.3",
