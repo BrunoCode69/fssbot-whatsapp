@@ -16,7 +16,7 @@ import makeWASocket, {
   Contact,
   proto,
   Chat as BaileysChat,
-} from '@whiskeysockets/baileys';
+} from 'baileys';
 import NodeCache from 'node-cache';
 import { Boom } from '@hapi/boom';
 import internal from 'stream';

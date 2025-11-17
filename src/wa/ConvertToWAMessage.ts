@@ -5,7 +5,7 @@ import {
   isJidGroup,
   MiscMessageGenerationOptions,
   proto,
-} from '@whiskeysockets/baileys';
+} from 'baileys';
 
 import Message, { MessageStatus, MessageType } from '../messages/Message';
 import ListMessage, { List, ListItem } from '../messages/ListMessage';

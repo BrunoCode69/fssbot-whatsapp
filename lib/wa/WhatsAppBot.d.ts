@@ -1,6 +1,6 @@
 /// <reference types="node" />
 /// <reference types="node" />
-import makeWASocket, { MediaDownloadOptions, AuthenticationCreds, WAConnectionState, DisconnectReason, ConnectionState, GroupMetadata, SocketConfig, Contact, proto, Chat as BaileysChat } from '@whiskeysockets/baileys';
+import makeWASocket, { MediaDownloadOptions, AuthenticationCreds, WAConnectionState, DisconnectReason, ConnectionState, GroupMetadata, SocketConfig, Contact, proto, Chat as BaileysChat } from 'baileys';
 import NodeCache from 'node-cache';
 import { PollMessage, PollUpdateMessage, ReactionMessage } from '../messages';
 import Message from '../messages/Message';

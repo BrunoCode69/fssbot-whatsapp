@@ -8,6 +8,7 @@ lerna-debug.log*
 
 # Example
 example/sessions
+example/example/sessions
 
 # Utils
 auto-merge.sh

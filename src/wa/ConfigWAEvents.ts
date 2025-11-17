@@ -4,7 +4,7 @@ import {
   WACallEvent,
   isJidGroup,
   proto,
-} from '@whiskeysockets/baileys';
+} from 'baileys';
 import { Boom } from '@hapi/boom';
 import Long from 'long';
 

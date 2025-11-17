@@ -1,7 +1,7 @@
 import type KeyedDB from '@adiwajshing/keyed-db';
 import NodeCache from 'node-cache';
 import { Logger } from 'pino';
-import { type BaileysEventEmitter, type Chat, type ConnectionState, type Contact, type GroupMetadata, type PresenceData, WAMessage, WAMessageCursor, WASocket, WAMessageKey, proto } from '@whiskeysockets/baileys';
+import { type BaileysEventEmitter, type Chat, type ConnectionState, type Contact, type GroupMetadata, type PresenceData, WAMessage, WAMessageCursor, WASocket, WAMessageKey, proto } from 'baileys';
 import { Comparable } from '@adiwajshing/keyed-db/lib/Types';
 interface Label {
     id: string;
@@ -49,17 +49,17 @@ export default function makeInMemoryStore({ logger: _logger, chatKey, labelAssoc
     };
     messages: {
         [_: string]: {
-            array: proto.IWebMessageInfo[];
+            array: WAMessage[];
             dictCache: NodeCache;
-            get: (id: string) => proto.IWebMessageInfo | undefined;
-            upsert: (item: proto.IWebMessageInfo, mode: "append" | "prepend") => void;
-            update: (item: proto.IWebMessageInfo) => boolean;
-            remove: (item: proto.IWebMessageInfo) => boolean;
-            updateAssign: (id: string, update: Partial<proto.IWebMessageInfo>) => boolean;
+            get: (id: string) => WAMessage | undefined;
+            upsert: (item: WAMessage, mode: "append" | "prepend") => void;
+            update: (item: WAMessage) => boolean;
+            remove: (item: WAMessage) => boolean;
+            updateAssign: (id: string, update: Partial<WAMessage>) => boolean;
             clear: () => void;
-            filter: (contain: (item: proto.IWebMessageInfo) => boolean) => void;
-            toJSON: () => proto.IWebMessageInfo[];
-            fromJSON: (newItems: proto.IWebMessageInfo[]) => void;
+            filter: (contain: (item: WAMessage) => boolean) => void;
+            toJSON: () => WAMessage[];
+            fromJSON: (newItems: WAMessage[]) => void;
         };
     };
     groupMetadata: {
@@ -75,7 +75,7 @@ export default function makeInMemoryStore({ logger: _logger, chatKey, labelAssoc
     labelAssociations: KeyedDB<LabelAssociation, string>;
     bind: (ev: BaileysEventEmitter) => void;
     /** loads messages from the store, if not found -- uses the legacy connection */
-    loadMessages: (jid: string, count: number, cursor: WAMessageCursor) => Promise<proto.IWebMessageInfo[]>;
+    loadMessages: (jid: string, count: number, cursor: WAMessageCursor) => Promise<WAMessage[]>;
     /**
      * Get all available labels for profile
      *
@@ -95,7 +95,7 @@ export default function makeInMemoryStore({ logger: _logger, chatKey, labelAssoc
      * @returns Label IDs
      **/
     getMessageLabels: (messageId: string) => string[];
-    loadMessage: (jid: string, id: string) => Promise<proto.IWebMessageInfo | undefined>;
+    loadMessage: (jid: string, id: string) => Promise<WAMessage | undefined>;
     mostRecentMessage: (jid: string) => Promise<proto.IWebMessageInfo | undefined>;
     fetchImageUrl: (jid: string, sock: WASocket) => Promise<string | null | undefined>;
     fetchGroupMetadata: (jid: string, sock: WASocket) => Promise<GroupMetadata>;
@@ -107,17 +107,17 @@ export default function makeInMemoryStore({ logger: _logger, chatKey, labelAssoc
         };
         messages: {
             [_: string]: {
-                array: proto.IWebMessageInfo[];
+                array: WAMessage[];
                 dictCache: NodeCache;
-                get: (id: string) => proto.IWebMessageInfo | undefined;
-                upsert: (item: proto.IWebMessageInfo, mode: "append" | "prepend") => void;
-                update: (item: proto.IWebMessageInfo) => boolean;
-                remove: (item: proto.IWebMessageInfo) => boolean;
-                updateAssign: (id: string, update: Partial<proto.IWebMessageInfo>) => boolean;
+                get: (id: string) => WAMessage | undefined;
+                upsert: (item: WAMessage, mode: "append" | "prepend") => void;
+                update: (item: WAMessage) => boolean;
+                remove: (item: WAMessage) => boolean;
+                updateAssign: (id: string, update: Partial<WAMessage>) => boolean;
                 clear: () => void;
-                filter: (contain: (item: proto.IWebMessageInfo) => boolean) => void;
-                toJSON: () => proto.IWebMessageInfo[];
-                fromJSON: (newItems: proto.IWebMessageInfo[]) => void;
+                filter: (contain: (item: WAMessage) => boolean) => void;
+                toJSON: () => WAMessage[];
+                fromJSON: (newItems: WAMessage[]) => void;
             };
         };
         labels: ObjectRepository<Label>;
@@ -129,7 +129,7 @@ export default function makeInMemoryStore({ logger: _logger, chatKey, labelAssoc
             [id: string]: Contact;
         };
         messages: {
-            [id: string]: proto.IWebMessageInfo[];
+            [id: string]: WAMessage[];
         };
         labels: {
             [labelId: string]: Label;

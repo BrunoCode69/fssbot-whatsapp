@@ -1,5 +1,5 @@
 /// <reference types="node" />
-import { AuthenticationState } from '@whiskeysockets/baileys';
+import { AuthenticationState } from 'baileys';
 import IAuth from '../client/IAuth';
 export declare class MultiFileAuthState implements IAuth {
     folder: string;

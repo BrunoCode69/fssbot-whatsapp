@@ -1,4 +1,4 @@
-import { MessageUpsertType, proto, WAMessage, WAMessageContent, WAMessageUpdate } from "@whiskeysockets/baileys";
+import { MessageUpsertType, proto, WAMessage, WAMessageContent, WAMessageUpdate } from "baileys";
 import Message, { MessageStatus } from "../messages/Message";
 import WhatsAppBot from "./WhatsAppBot";
 export default class ConvertWAMessage {

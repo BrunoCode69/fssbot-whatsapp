@@ -17,7 +17,7 @@ import {
   WASocket,
   WAMessageKey,
   proto,
-} from '@whiskeysockets/baileys';
+} from 'baileys';
 
 // Importação de tipos e funções necessárias
 import { Comparable } from '@adiwajshing/keyed-db/lib/Types';

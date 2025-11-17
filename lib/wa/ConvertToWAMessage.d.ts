@@ -1,4 +1,4 @@
-import { MiscMessageGenerationOptions, proto } from '@whiskeysockets/baileys';
+import { MiscMessageGenerationOptions, proto } from 'baileys';
 import Message, { MessageStatus } from '../messages/Message';
 import ListMessage from '../messages/ListMessage';
 import LocationMessage from '../messages/LocationMessage';

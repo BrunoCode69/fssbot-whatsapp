@@ -5,7 +5,7 @@ import {
   proto,
   AuthenticationState,
   AuthenticationCreds,
-} from '@whiskeysockets/baileys';
+} from 'baileys';
 import { readFile, writeFile, unlink } from 'fs/promises';
 import { mkdirSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';

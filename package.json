@@ -5,7 +5,7 @@
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "scripts": {
-    "example": "ts-node-dev example/index.ts",
+    "example": "tsx example/index.ts",
     "cluster": "ts-node-dev example/cluster.ts",
     "telegram": "ts-node-dev example/telegram.ts",
     "build": "npm i && npm run clean && tsc",
@@ -15,8 +15,8 @@
     "@adiwajshing/keyed-db": "0.2.4",
     "@hapi/boom": "9.1.3",
     "@types/qrcode-terminal": "^0.12.2",
-    "@whiskeysockets/baileys": "^6.7.18",
     "axios": "1.6.5",
+    "baileys": "^7.0.0-rc.6",
     "body-parser": "1.20.2",
     "cluster": "0.7.7",
     "crypto-digest-sync": "1.0.0",

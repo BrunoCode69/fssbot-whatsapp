@@ -1,4 +1,4 @@
-import { MessageUpsertType, proto } from '@whiskeysockets/baileys';
+import { MessageUpsertType, proto } from 'baileys';
 import WhatsAppBot from './WhatsAppBot';
 export default class ConfigWAEvents {
     wa: WhatsAppBot;
