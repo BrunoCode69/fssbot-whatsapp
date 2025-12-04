@@ -8,7 +8,7 @@
     "example": "tsx example/index.ts",
     "cluster": "ts-node-dev example/cluster.ts",
     "telegram": "ts-node-dev example/telegram.ts",
-    "build": "npm i && npm run clean && tsc",
+    "build": "bun i && bun run clean && tsc",
     "clean": "rimraf lib"
   },
   "dependencies": {
@@ -17,7 +17,9 @@
     "@types/qrcode-terminal": "^0.12.2",
     "axios": "1.6.5",
     "baileys": "^7.0.0-rc.6",
+    "baileys_helper": "^1.0.6",
     "body-parser": "1.20.2",
+    "canvas": "^3.2.0",
     "cluster": "0.7.7",
     "crypto-digest-sync": "1.0.0",
     "express": "4.18.2",

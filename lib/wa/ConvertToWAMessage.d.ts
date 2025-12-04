@@ -20,6 +20,10 @@ export default class ConvertToWAMessage {
     isRelay: boolean;
     constructor(bot: WhatsAppBot, message: Message, isMention?: boolean);
     /**
+     * Normaliza um JID usando o método do WhatsAppBot
+     */
+    private safeNormalizeJid;
+    /**
      * * Refatora a mensagem
      * @param message
      */
@@ -50,16 +54,20 @@ export default class ConvertToWAMessage {
     refactoryPollMessage(message: PollMessage): void;
     /**
      * * Refatora uma mensagem de botão
+     * OPÇÃO 1: Formato simples (NÃO FUNCIONA mais no Baileys 7.x)
+     * OPÇÃO 2: Usar baileys_helper (FUNCIONA, mas apenas no Mobile)
      * @param message
      */
     refactoryButtonMessage(message: ButtonMessage): void;
     /**
      * * Refatora uma mensagem de lista
+     * OPÇÃO 1: Formato simples compatível com Web e Mobile ✅ (RECOMENDADO)
+     * OPÇÃO 2: Formato interativo com baileys_helper (apenas Mobile)
      * @param message
      */
     refactoryListMessage(message: ListMessage): Promise<void>;
     /**
-     * * Refatora uma mensagem de lista
+     * * Refatora uma mensagem customizada
      * @param message
      */
     refactoryCustomMessage(message: CustomMessage): Promise<void>;

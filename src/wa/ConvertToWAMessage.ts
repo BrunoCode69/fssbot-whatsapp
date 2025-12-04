@@ -5,6 +5,7 @@ import {
   isJidGroup,
   MiscMessageGenerationOptions,
   proto,
+  jidNormalizedUser,
 } from 'baileys';
 
 import Message, { MessageStatus, MessageType } from '../messages/Message';
@@ -43,12 +44,40 @@ export default class ConvertToWAMessage {
   }
 
   /**
+   * Normaliza um JID usando o método do WhatsAppBot
+   */
+  private safeNormalizeJid(jid: string | undefined): string | undefined {
+    if (!jid || typeof jid !== 'string') return undefined;
+
+    try {
+      if (jid.includes('@')) {
+        return jidNormalizedUser(jid);
+      }
+
+      if (/^\d+$/.test(jid)) {
+        return jidNormalizedUser(`${jid}@s.whatsapp.net`);
+      }
+
+      return undefined;
+    } catch (error) {
+      this.bot.logger?.error?.('Error normalizing JID:', jid, error);
+      return undefined;
+    }
+  }
+
+  /**
    * * Refatora a mensagem
    * @param message
    */
   public async refactory(message = this.message): Promise<this> {
     this.waMessage = await this.refactoryMessage(message);
-    this.chatId = message.chat.id;
+
+    // Normaliza o chatId
+    const normalizedChatId = this.safeNormalizeJid(message.chat.id);
+    if (!normalizedChatId) {
+      throw new Error(`Invalid chat ID: ${message.chat.id}`);
+    }
+    this.chatId = normalizedChatId;
 
     if (message.mention && !this.isMention) {
       const { chatId, waMessage } = await new ConvertToWAMessage(
@@ -58,7 +87,7 @@ export default class ConvertToWAMessage {
       ).refactory(message.mention);
 
       const userJid = message.mention.user.id
-        ? message.mention.user.id
+        ? this.safeNormalizeJid(message.mention.user.id) || fixID(this.bot.id)
         : fixID(this.bot.id);
 
       this.options.quoted = await generateWAMessage(
@@ -106,15 +135,21 @@ export default class ConvertToWAMessage {
 
     msg.text = message.text;
 
-    if (!!message.user.id && isJidGroup(message.chat.id)) {
-      msg.participant = message.user.id;
+    const normalizedChatId = this.safeNormalizeJid(message.chat.id);
+    const normalizedUserId = this.safeNormalizeJid(message.user.id);
+
+    if (normalizedUserId && normalizedChatId && isJidGroup(normalizedChatId)) {
+      msg.participant = normalizedUserId;
     }
 
     if (message.mentions) {
       msg.mentions = [];
 
       for (const jid of message.mentions) {
-        msg.mentions.push(jid);
+        const normalizedJid = this.safeNormalizeJid(jid);
+        if (normalizedJid) {
+          msg.mentions.push(normalizedJid);
+        }
       }
 
       for (const mention of msg.text.split(/@(.*?)/)) {
@@ -127,9 +162,9 @@ export default class ConvertToWAMessage {
         )
           continue;
 
-        const jid = getID(mentionNumber);
+        const jid = this.safeNormalizeJid(getID(mentionNumber));
 
-        if (msg.mentions.includes(jid)) continue;
+        if (!jid || msg.mentions.includes(jid)) continue;
 
         msg.mentions.push(jid);
       }
@@ -139,13 +174,17 @@ export default class ConvertToWAMessage {
     if (message.id) msg.id = message.id;
 
     if (message.isEdited) {
+      const normalizedEditChatId = this.safeNormalizeJid(message.chat.id);
+      const normalizedEditUserId = this.safeNormalizeJid(message.user.id);
+
       msg.edit = {
-        remoteJid: message.chat.id || '',
+        remoteJid: normalizedEditChatId || '',
         id: message.id || '',
-        fromMe: message.fromMe || message.user.id == this.bot.id,
-        participant: isJidGroup(message.chat.id)
-          ? message.user.id || this.bot.id
-          : undefined,
+        fromMe: message.fromMe || normalizedEditUserId == this.bot.id,
+        participant:
+          normalizedEditChatId && isJidGroup(normalizedEditChatId)
+            ? normalizedEditUserId || this.bot.id
+            : undefined,
         toJSON: () => this,
       };
     }
@@ -242,12 +281,15 @@ export default class ConvertToWAMessage {
     };
 
     for (const user of message.contacts) {
+      const normalizedUserId = this.safeNormalizeJid(user.id);
+      if (!normalizedUserId) continue;
+
       const vcard =
         'BEGIN:VCARD\n' +
         'VERSION:3.0\n' +
         `FN:${''}\n` +
         (user.description ? `ORG:${user.description};\n` : '') +
-        `TEL;type=CELL;type=VOICE;waid=${user.id}: ${user.id}\n` +
+        `TEL;type=CELL;type=VOICE;waid=${normalizedUserId}: ${normalizedUserId}\n` +
         'END:VCARD';
 
       if (message.contacts.length < 2) {
@@ -269,18 +311,22 @@ export default class ConvertToWAMessage {
    * @param message
    */
   public refactoryReactionMessage(message: ReactionMessage) {
+    const normalizedChatId = this.safeNormalizeJid(message.chat.id);
+    const normalizedUserId = this.safeNormalizeJid(message.user.id);
+
     this.waMessage = {
       react: {
         key: {
-          remoteJid: message.chat.id,
+          remoteJid: normalizedChatId || message.chat.id,
           id: message.id || '',
           fromMe:
-            message.fromMe || !message.user.id
+            message.fromMe || !normalizedUserId
               ? true
-              : message.user.id == this.bot.id,
-          participant: isJidGroup(message.chat.id)
-            ? message.user.id || this.bot.id
-            : undefined,
+              : normalizedUserId == this.bot.id,
+          participant:
+            normalizedChatId && isJidGroup(normalizedChatId)
+              ? normalizedUserId || this.bot.id
+              : undefined,
           toJSON: () => this,
         },
         text: message.text,
@@ -297,72 +343,121 @@ export default class ConvertToWAMessage {
       poll: {
         name: message.text,
         values: message.options.map((opt) => opt.name),
+        selectableCount: message.multipleAnswers ? message.options.length : 1,
       },
     };
   }
 
   /**
    * * Refatora uma mensagem de botão
+   * OPÇÃO 1: Formato simples (NÃO FUNCIONA mais no Baileys 7.x)
+   * OPÇÃO 2: Usar baileys_helper (FUNCIONA, mas apenas no Mobile)
    * @param message
    */
   public refactoryButtonMessage(message: ButtonMessage) {
-    this.waMessage.text = message.text;
-    this.waMessage.footer = message.footer;
-    this.waMessage.viewOnce = true;
-
-    if (message.type == MessageType.TemplateButton) {
-      this.waMessage.templateButtons = message.buttons.map((button) => {
-        if (button.type == 'reply')
-          return {
-            index: button.index,
-            quickReplyButton: { displayText: button.text, id: button.content },
-          };
-        if (button.type == 'call')
-          return {
-            index: button.index,
-            callButton: {
-              displayText: button.text,
-              phoneNumber: button.content,
-            },
-          };
-        if (button.type == 'url')
-          return {
-            index: button.index,
-            urlButton: { displayText: button.text, url: button.content },
-          };
-      });
-    } else {
-      this.waMessage.buttons = message.buttons.map((button) => {
-        return {
-          buttonId: button.content,
-          buttonText: { displayText: button.text },
-          type: 1,
-        };
-      });
+    // Valida se há botões
+    if (!message.buttons || message.buttons.length === 0) {
+      throw new Error('ButtonMessage deve ter pelo menos um botão');
     }
+
+    // Máximo de 3 botões
+    if (message.buttons.length > 3) {
+      throw new Error('ButtonMessage suporta no máximo 3 botões');
+    }
+
+    // =========================================
+    // OPÇÃO: Usar baileys_helper (recomendado)
+    // =========================================
+    // Marca para usar baileys_helper
+    this.isRelay = true;
+
+    // Converte botões para formato baileys_helper
+    const interactiveButtons = message.buttons.map((button) => {
+      if (button.type === 'reply') {
+        return {
+          name: 'quick_reply',
+          buttonParamsJson: JSON.stringify({
+            display_text: button.text,
+            id: button.content,
+          }),
+        };
+      } else if (button.type === 'url') {
+        return {
+          name: 'cta_url',
+          buttonParamsJson: JSON.stringify({
+            display_text: button.text,
+            url: button.content,
+            merchant_url: button.content,
+          }),
+        };
+      } else if (button.type === 'call') {
+        return {
+          name: 'cta_call',
+          buttonParamsJson: JSON.stringify({
+            display_text: button.text,
+            phone_number: button.content,
+          }),
+        };
+      }
+
+      // Fallback para quick_reply se tipo desconhecido
+      return {
+        name: 'quick_reply',
+        buttonParamsJson: JSON.stringify({
+          display_text: button.text,
+          id: button.content,
+        }),
+      };
+    });
+
+    // Usa baileys_helper (flag especial)
+    this.waMessage = {
+      __useBaileysHelper: true, // Flag para detectar no método send()
+      text: message.text || '',
+      footer: message.footer || undefined,
+      interactiveButtons: interactiveButtons,
+    };
   }
 
   /**
    * * Refatora uma mensagem de lista
+   * OPÇÃO 1: Formato simples compatível com Web e Mobile ✅ (RECOMENDADO)
+   * OPÇÃO 2: Formato interativo com baileys_helper (apenas Mobile)
    * @param message
    */
   public async refactoryListMessage(message: ListMessage) {
+    // Valida se há pelo menos uma seção com itens
+    if (!message.list || message.list.length === 0) {
+      throw new Error('Lista deve ter pelo menos uma seção');
+    }
+
+    const hasItems = message.list.some((list) => list.items && list.items.length > 0);
+    if (!hasItems) {
+      throw new Error('Lista deve ter pelo menos um item');
+    }
+
+    // =========================================
+    // DECISÃO: Qual formato usar?
+    // =========================================
+
+    // Se interactiveMode está habilitado, usa baileys_helper (APENAS MOBILE)
     if (message.interactiveMode) {
       this.isRelay = true;
 
-      const listMessage = {
+      // Converte para formato baileys_helper
+      const listButton = {
         name: 'single_select',
         buttonParamsJson: JSON.stringify({
-          title: message.button,
+          title: message.button || 'Ver Opções',
           sections: message.list.map((list: List) => {
             return {
               title: list.title,
-              ...(list.label ? { label: list.label } : {}),
-              rows: list.items.map((item) => {
+              highlight_label: list.label || undefined,
+              rows: list.items.map((item: ListItem) => {
                 return {
-                  header: item.header ? item.header : item.title,
-                  title: item.header ? item.title : '',
-                  description: item.description,
+                  header: item.header || undefined,
+                  title: item.title,
+                  description: item.description || undefined,
                   id: item.id,
                 };
               }),
@@ -371,81 +466,46 @@ export default class ConvertToWAMessage {
         }),
       };
 
-      const waMessage = generateWAMessageFromContent(
-        this.chatId,
-        {
-          viewOnceMessage: {
-            message: {
-              messageContextInfo: {
-                deviceListMetadata: {},
-                deviceListMetadataVersion: 2,
-              },
-              interactiveMessage: {
-                body: {
-                  text: message.text,
-                },
-                footer: {
-                  text: message.footer,
-                },
-                header: {
-                  title: message.title,
-                  subtitle: message.subtitle,
-                  hasMediaAttachment: false,
-                },
-                nativeFlowMessage: {
-                  buttons: [listMessage],
-                },
-              },
-            },
-          },
-        },
-        { userJid: this.bot.id },
-      );
-
-      this.waMessage = waMessage.message;
+      // Usa baileys_helper (flag especial)
+      this.waMessage = {
+        __useBaileysHelper: true, // Flag para detectar no método send()
+        text: message.text || '',
+        title: message.title || undefined,
+        footer: message.footer || undefined,
+        interactiveButtons: [listButton],
+      };
 
       return;
     }
 
-    this.waMessage.buttonText = message.button;
-    this.waMessage.description = message.text;
-    this.waMessage.footer = message.footer;
-    this.waMessage.title = message.title;
-    this.waMessage.listType = message.listType;
-    this.waMessage.viewOnce = false;
-    this.isRelay = true;
+    // =========================================
+    // Formato SIMPLES (compatível Web + Mobile) ✅
+    // =========================================
+    this.waMessage = {
+      text: message.text || '',
+      footer: message.footer || undefined,
+      title: message.title || undefined,
+      buttonText: message.button || 'Ver Opções',
+      sections: message.list.map((list: List) => {
+        return {
+          title: list.title,
+          rows: list.items.map((item: ListItem) => {
+            return {
+              title: item.title,
+              description: item.description || undefined,
+              rowId: item.id,
+            };
+          }),
+        };
+      }),
+    };
 
-    this.waMessage.sections = message.list.map((list: List) => {
-      return {
-        title: list.title,
-        rows: list.items.map((item: ListItem) => {
-          return {
-            title: item.title,
-            description: item.description,
-            rowId: item.id,
-          };
-        }),
-      };
-    });
-
-    if (this.isRelay) {
-      this.waMessage = await generateWAMessageContent(this.waMessage, {
-        upload: () => ({}) as any,
-      });
-
-      if (this.waMessage?.viewOnceMessage?.message?.listMessage) {
-        this.waMessage.viewOnceMessage.message.listMessage.listType =
-          message.listType;
-      }
-
-      if (this.waMessage?.listMessage) {
-        this.waMessage.listMessage.listType = message.listType;
-      }
-    }
+    // Não precisa de relay para o formato simples
+    this.isRelay = false;
   }
 
   /**
-   * * Refatora uma mensagem de lista
+   * * Refatora uma mensagem customizada
    * @param message
    */
   public async refactoryCustomMessage(message: CustomMessage) {

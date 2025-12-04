@@ -50,52 +50,27 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     checkConnectionInterval: NodeJS.Timer | null;
     configEvents: ConfigWAEvents;
     constructor(config?: Partial<WhatsAppBotConfig>);
+    /**
+     * Normaliza um JID para o formato correto do Baileys 7.x
+     * Usa o jidNormalizedUser oficial do Baileys
+     * @param jid - JID a ser normalizado
+     * @returns JID normalizado ou undefined se inválido
+     */
+    private safeNormalizeJid;
+    /**
+     * Normaliza um array de JIDs
+     */
+    private safeNormalizeJids;
     connect(auth?: string | IAuth): Promise<void>;
     internalConnect(additionalOptions?: Partial<WhatsAppBot['config']>): Promise<void>;
-    /**
-     * * Reconecta ao servidor do WhatsApp
-     * @returns
-     */
     reconnect(stopEvents?: boolean, showOpen?: boolean): Promise<void>;
-    /**
-     * * Desliga a conexão com o servidor do WhatsApp
-     * @param reason
-     * @returns
-     */
     stop(reason?: any): Promise<void>;
     logout(): Promise<void>;
-    /**
-     * * Aguarda um status de conexão
-     */
     awaitConnectionState(connection: WAConnectionState): Promise<Partial<ConnectionState>>;
-    /**
-     * * Lê o chat
-     * @param chat Sala de bate-papo
-     */
     readChat(chat: Partial<Chat>, metadata?: Partial<GroupMetadata> & Partial<BaileysChat>, updateMetadata?: boolean): Promise<void>;
-    /**
-     * * Lê o usuário
-     * @param user Usuário
-     */
     readUser(user: Partial<User>, metadata?: Partial<Contact>): Promise<void>;
-    /**
-     * Obtem uma mensagem de enquete.
-     * @param pollMessageId - ID da mensagem de enquete que será obtida.
-     * @returns A mensagem de enquete salva.
-     */
     getPollMessage(pollMessageId: string): Promise<PollMessage | PollUpdateMessage>;
-    /**
-     * Salva a mensagem de enquete.
-     * @param pollMessage - Mensagem de enquete que será salva.
-     */
     savePollMessage(pollMessage: PollMessage | PollUpdateMessage): Promise<void>;
-    /**
-     * * Trata atualizações de participantes
-     * @param action Ação realizada
-     * @param chatId Sala de bate-papo que a ação foi realizada
-     * @param userId Usuário que foi destinado a ação
-     * @param fromId Usuário que realizou a ação
-     */
     groupParticipantsUpdate(action: UserAction, chatId: string, userId: string, fromId: string): Promise<void>;
     getChatName(chat: Chat): Promise<string>;
     setChatName(chat: Chat, name: string): Promise<void>;
@@ -154,49 +129,30 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     addReaction(message: ReactionMessage): Promise<void>;
     removeReaction(message: ReactionMessage): Promise<void>;
     editMessage(message: Message): Promise<void>;
-    send(content: Message): Promise<Message>;
     /**
-     * * Cacheia uma mensagem.
-     * @param id - Mensagem a ser cacheada.
-     * @remarks Auto remove a mensagem cacheada após 1 minuto.
-     */
+   * Envia mensagem interativa usando baileys_helper
+   * @param jid - ID do chat (deve estar normalizado)
+   * @param content - Conteúdo da mensagem interativa
+   */
+    sendInteractive(jid: string, content: {
+        text?: string;
+        title?: string;
+        footer?: string;
+        interactiveButtons: Array<{
+            name: string;
+            buttonParamsJson: string;
+        }>;
+    }): Promise<any>;
+    send(content: Message): Promise<Message>;
     addMessageCache(id: string): void;
     downloadStreamMessage(media: Media): Promise<Buffer>;
     experimentalDownloadMediaMessage(media: Media, maxRetryCount?: number): Promise<Buffer>;
-    /**
-     * * Faz o download de arquivos do WhatsApp
-     * @param message
-     * @param type
-     * @param options
-     * @param ctx
-     * @returns
-     */
     download(message: proto.WebMessageInfo, type: 'buffer' | 'stream', options: MediaDownloadOptions, ctx?: any): Promise<any>;
-    /**
-     * * Verifica se o número está registrado no WhatsApp
-     * @returns
-     */
     onExists(id: string): Promise<{
         exists: boolean;
         id: string;
     }>;
-    /**
-     * * Atualiza uma mensagem de mídia
-     * @param message
-     * @returns
-     */
     updateMediaMessage(message: proto.IWebMessageInfo): Promise<proto.IWebMessageInfo>;
-    /**
-     * * Aceita o convite para um grupo
-     * @param code
-     * @returns
-     */
     groupAcceptInvite(code: string): Promise<string>;
-    /**
-     * * Gera a configuração de navegador
-     * @param plataform Nome da plataforma
-     * @param browser Nome do navegador
-     * @param version Versão do navegador
-     */
     static Browser(plataform?: string, browser?: string, version?: string): [string, string, string];
 }

@@ -1,54 +1,56 @@
+// =========================================
+// IMPORTANTE: Botões antigos NÃO funcionam mais!
+// =========================================
+// O formato antigo (templateButtons, buttons) foi DESCONTINUADO
+// pelo WhatsApp. Use baileys_helper para botões funcionais.
+
 import Message, { MessageType } from "./Message";
 import { injectJSON } from "../utils/Generic";
 import Chat from "../modules/chat/Chat";
 
-/**
- * Representa um botão em uma mensagem.
- */
+/** Tipo de botão */
+export type ButtonType = 'reply' | 'url' | 'call';
+
+/** Botão da mensagem */
 export type Button = {
-  /** Posição do botão na lista. */
-  index: number;
-  /** Tipo do botão. */
+  /** Tipo do botão */
   type: ButtonType;
-  /** Texto exibido no botão. */
+  /** Texto exibido no botão */
   text: string;
-  /** Conteúdo associado ao botão (pode ser uma URL, telefone ou ID de resposta). */
+  /** Conteúdo do botão (ID, URL ou número de telefone) */
   content: string;
+  /** Índice do botão (usado em templateButtons) */
+  index?: number;
 };
 
 /**
- * Tipo de botão disponível.
- */
-export enum ButtonType {
-  /** Botão de resposta. */
-  Reply = "reply",
-  /** Botão para fazer uma ligação. */
-  Call = "call",
-  /** Botão para abrir uma URL. */
-  Url = "url",
-}
-
-/**
- * Representa uma mensagem com botões interativos.
+ * Representa uma mensagem com botões.
+ * ATENÇÃO: Botões tradicionais não funcionam mais no Baileys 7.x
+ * Use baileys_helper para botões funcionais
  */
 export default class ButtonMessage extends Message {
-  /** O tipo da mensagem é MessageType.Button ou MessageType.TemplateButton. */
-  public type: MessageType.Button | MessageType.TemplateButton = MessageType.TemplateButton;
-
-  /** Texto exibido no rodapé da mensagem. */
-  public footer: string;
-
-  /** Lista de botões associados à mensagem. */
+  /** O tipo da mensagem é sempre MessageType.Button ou MessageType.TemplateButton */
+  public type = MessageType.Button;
+  /** Lista de botões */
   public buttons: Button[] = [];
+  /** Texto do rodapé */
+  public footer: string;
+  /** Usa formato de quick_reply do baileys_helper (recomendado) */
+  public useQuickReply: boolean = true;
 
   /**
-   * Cria uma nova instância de ButtonMessage.
-   * @param chat - O chat associado à mensagem de botões (opcional).
-   * @param text - O texto da mensagem (opcional).
-   * @param footer - Texto exibido no rodapé da mensagem (padrão é uma string vazia).
-   * @param others - Outras propriedades da mensagem de botões (opcional).
+   * Cria uma nova instância de ButtonMessage
+   * @param chat - Chat associado à mensagem
+   * @param text - Texto da mensagem
+   * @param footer - Texto do rodapé
+   * @param others - Outras propriedades
    */
-  constructor(chat?: Chat | string, text?: string, footer: string = "", others: Partial<ButtonMessage> = {}) {
+  constructor(
+    chat?: Chat | string,
+    text?: string,
+    footer: string = "",
+    others: Partial<ButtonMessage> = {}
+  ) {
     super(chat, text);
 
     this.footer = footer;
@@ -57,53 +59,58 @@ export default class ButtonMessage extends Message {
   }
 
   /**
-   * Adiciona um botão de URL à mensagem.
-   * @param text - Texto exibido no botão.
-   * @param url - URL associada ao botão.
-   * @param index - Posição do botão na lista (padrão é a próxima posição disponível).
+   * Adiciona um botão de resposta rápida
+   * @param text - Texto do botão
+   * @param id - ID do botão
+   * @param index - Índice do botão (opcional)
    */
-  public addUrl(text: string, url: string, index: number = this.buttons.length + 1) {
-    this.buttons.push({ index, type: ButtonType.Url, text, content: url });
+  public addReply(text: string, id: string, index?: number) {
+    this.buttons.push({
+      type: 'reply',
+      text,
+      content: id,
+      index: index ?? this.buttons.length,
+    });
   }
 
   /**
-   * Adiciona um botão de chamada telefônica à mensagem.
-   * @param text - Texto exibido no botão.
-   * @param phone - Número de telefone associado ao botão.
-   * @param index - Posição do botão na lista (padrão é a próxima posição disponível).
+   * Adiciona um botão de URL
+   * @param text - Texto do botão
+   * @param url - URL do botão
+   * @param index - Índice do botão (opcional)
    */
-  public addCall(text: string, phone: string, index: number = this.buttons.length + 1) {
-    this.buttons.push({ index, type: ButtonType.Call, text, content: phone });
+  public addUrl(text: string, url: string, index?: number) {
+    this.buttons.push({
+      type: 'url',
+      text,
+      content: url,
+      index: index ?? this.buttons.length,
+    });
   }
 
   /**
-   * Adiciona um botão de resposta interativa à mensagem.
-   * @param text - Texto exibido no botão.
-   * @param id - ID de resposta associado ao botão.
-   * @param index - Posição do botão na lista (padrão é a próxima posição disponível).
+   * Adiciona um botão de chamada
+   * @param text - Texto do botão
+   * @param phoneNumber - Número de telefone
+   * @param index - Índice do botão (opcional)
    */
-  public addReply(text: string, id: string = String(this.buttons.length + 1), index: number = this.buttons.length + 1) {
-    this.buttons.push({ index, type: ButtonType.Reply, text, content: id });
+  public addCall(text: string, phoneNumber: string, index?: number) {
+    this.buttons.push({
+      type: 'call',
+      text,
+      content: phoneNumber,
+      index: index ?? this.buttons.length,
+    });
   }
 
   /**
-   * Remove um botão da lista com base na posição.
-   * @param index - Posição do botão a ser removido.
-   */
-  public remove(index: number) {
-    this.buttons.splice(index, 1);
-  }
-
-  /**
-   * Converte o objeto atual para uma representação em formato JSON.
-   * @returns Um objeto JSON que representa o estado atual do objeto.
+   * Converte para formato JSON
    */
   public toJSON(): any {
     const data: Record<string, any> = {};
 
     for (const key of Object.keys(this)) {
       if (key == "toJSON") continue;
-
       data[key] = this[key];
     }
 
@@ -111,20 +118,24 @@ export default class ButtonMessage extends Message {
   }
 
   /**
-   * Desserializa um objeto JSON em uma instância de ButtonMessage.
-   * @param data - O objeto JSON a ser desserializado.
-   * @returns Uma instância de ButtonMessage.
+   * Desserializa um objeto JSON em uma instância de ButtonMessage
    */
   public static fromJSON(data: any): ButtonMessage {
-    return Message.fix(!data || typeof data != "object" ? new ButtonMessage() : injectJSON(data, new ButtonMessage()));
+    return Message.fix(
+      !data || typeof data != "object"
+        ? new ButtonMessage()
+        : injectJSON(data, new ButtonMessage())
+    );
   }
 
   /**
-   * Verifica se um objeto é uma instância válida de ButtonMessage.
-   * @param message - O objeto a ser verificado como uma instância de ButtonMessage.
-   * @returns Verdadeiro se o objeto for uma instância válida de ButtonMessage, caso contrário, falso.
+   * Verifica se um objeto é uma instância válida de ButtonMessage
    */
   public static isValid(message: any): message is ButtonMessage {
-    return Message.isValid(message) && message?.type == MessageType.Button;
+    return (
+      Message.isValid(message) &&
+      (message?.type == MessageType.Button ||
+        message?.type == MessageType.TemplateButton)
+    );
   }
 }
