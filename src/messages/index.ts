@@ -20,7 +20,6 @@ import EmptyMessage from "./EmptyMessage";
 import ErrorMessage from "./ErrorMessage";
 import FileMessage from "./FileMessage";
 import TextMessage from "./TextMessage";
-import CustomMessage from "./CustomMessage";
 
 export {
   MessageType,
@@ -49,5 +48,4 @@ export {
   StickerMessage,
   TextMessage,
   VideoMessage,
-  CustomMessage,
 };

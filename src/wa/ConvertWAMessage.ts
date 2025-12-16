@@ -491,19 +491,14 @@ export default class ConvertWAMessage {
 
     buttonMSG.text = buttonMessage.contentText || buttonMessage.hydratedContentText || "";
     buttonMSG.footer = buttonMessage.footerText || buttonMessage.hydratedFooterText || "";
-    // buttonMSG.setType(buttonMessage.headerType || buttonMessage.hydratedHeaderType || 1)
 
     if (buttonMessage.buttons) {
-      buttonMSG.type = MessageType.Button;
-
       buttonMessage.buttons?.map((button: proto.Message.ButtonsMessage.IButton) => {
         buttonMSG.addReply(button?.buttonText?.displayText || "", button.buttonId || String(Date.now()));
       });
     }
 
     if (buttonMessage.hydratedButtons) {
-      buttonMSG.type = MessageType.TemplateButton;
-
       buttonMessage.hydratedButtons?.map((button: any) => {
         if (button.callButton) {
           buttonMSG.addCall(button.callButton.displayText || "", button.callButton.phoneNumber || buttonMSG.buttons.length);
@@ -538,7 +533,14 @@ export default class ConvertWAMessage {
     listMSG.title = listMessage.title || "";
     listMSG.footer = listMessage.footerText || "";
     listMSG.button = listMessage.buttonText || "";
-    listMSG.listType = listMessage.listType || ListType.UNKNOWN;
+    
+    // Converte o listType, usando UNKNOWN como padrão
+    const listType = listMessage.listType as number;
+    if (listType in ListType) {
+      listMSG.listType = listType as ListType;
+    } else {
+      listMSG.listType = ListType.UNKNOWN;
+    }
 
     listMessage?.sections?.map((list) => {
       const index = listMSG.list.length;
@@ -553,8 +555,9 @@ export default class ConvertWAMessage {
   }
 
   /**
-   * * Converte uma mensagem de interativa
+   * * Converte uma mensagem de botão
    * @param content
+   * @returns
    */
   public convertInteractiveMessage(content: WAMessageContent) {
     const interactiveMessage = content.interactiveMessage;

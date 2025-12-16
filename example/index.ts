@@ -1,187 +1,176 @@
+import { Client, Message, TextMessage, ButtonMessage, ListMessage, Chat } from "../lib";
+import { WhatsAppBot } from "../lib/wa";
+import * as fs from "fs";
+import * as path from "path";
 
-import Client, {
-  WhatsAppBot,
-  Message,
-  EmptyMessage,
-  MultiFileAuthState,
-  ListMessage,
-  ButtonMessage,
-  MessageHandler,
-  ImageMessage,
-} from '../src';
-import { generateProductCard, generateProductCardDetailed } from './generateProductCard';
-import { generateProfileImage } from './generateProfileImage';
+// Caminho para salvar a autenticação
+const authPath = "chrome";
 
-const wbot = new WhatsAppBot({
-  autoSyncHistory: false,
-  useExperimentalServers: true,
-});
+async function main() {
+    console.log("🚀 Iniciando cliente WhatsApp...");
 
-const client = new Client(wbot, {
-  disableAutoCommand: false,
-  disableAutoCommandForOldMessage: true,
-  disableAutoCommandForUnofficialMessage: true,
-  disableAutoTyping: false,
-  disableAutoRead: false,
-});
+    // Criar cliente WhatsApp
+    const bot = new WhatsAppBot({ printQRInTerminal: true });
 
-client.on('open', (open: { isNewLogin: boolean }) => {
-  if (open.isNewLogin) {
-    console.info('Nova conexão');
-  }
-  console.info('Cliente conectado!');
-});
+    const client = new Client(bot, {
+        maxTimeout: 60000,
+        maxReconnectTimes: 5,
+    });
 
-client.on('close', (update) => {
-  console.info(`Cliente desconectou! Motivo: ${update.reason}`);
-});
+    // Eventos do cliente
+    client.on("open", () => {
+        console.log("✅ Cliente conectado ao WhatsApp!");
+    });
 
+    client.on("connecting", () => {
+        console.log("🔄 Conectando ao WhatsApp...");
+    });
 
-client.on('connecting', () => {
-  console.info('Tentando conectar cliente...');
-});
+    client.on("reconnecting", () => {
+        console.log("🔄 Reconectando ao WhatsApp...");
+    });
 
-client.on('stop', (update) => {
-  if (update.isLogout) {
-    console.info(`Cliente desligado!`);
-  } else {
-    console.info(`Cliente parado!`);
-  }
-});
+    client.on("close", () => {
+        console.log("❌ Conexão fechada");
+    });
 
-client.on('reconnecting', () => {
-  console.info('Reconectando...');
-});
+    client.on("qr", (qrCode: string) => {
+        console.log("📱 Escaneie o QR code abaixo com seu WhatsApp:")
+        import("qrcode-terminal").then((QRCode) => {
+            QRCode.generate(qrCode, { small: true });
+        })
+    });
 
+    client.on("message", async (message: Message) => {
+        try {
+            console.log(`\n📨 Mensagem recebida de ${message.user.id}`);
+            console.log(`   Chat: ${message.chat.id}`);
+            console.log(`   Tipo: ${message.type}`);
+            console.log(`   Texto: ${message.text}`);
 
-client.on('message', async (message: Message) => {
-  if (EmptyMessage.isValid(message)) return;
-  if (message.isOld) return;
+            // Responder apenas se não for mensagem enviada pelo bot
+            if (message.fromMe) return;
 
+            // Echo simples
+            if (message.text?.toLowerCase() === "oi") {
+                await client.sendMessage(
+                    message.chat,
+                    `Olá ${message.user.id}! 👋`
+                );
+            }
 
-  if (message.text === "button") {
-    const btnMessage = new ButtonMessage(message.chat, "texto", "rodapé");
-    btnMessage.addUrl("Link", "https://example.com");
+            // Teste de botões
+            if (message.text?.toLowerCase() === "botoes") {
+                const buttonMsg = new ButtonMessage(
+                    message.chat,
+                    "Escolha uma opção abaixo:",
+                    [
+                        { type: "reply", text: "Opção 1", content: "op1" },
+                        { type: "reply", text: "Opção 2", content: "op2" },
+                        { type: "reply", text: "Opção 3", content: "op3" },
+                    ],
+                    { footer: "Use um dos botões acima" }
+                );
 
-    await client.send(btnMessage);
-  }
+                await client.send(buttonMsg);
+                console.log("✅ Mensagem com botões enviada!");
+            }
 
-  if (message.text === "list") {
-    const listMessage = new ListMessage(message.chat, "texto", "botão", "titulo", "rodapé");
-    const index1 = listMessage.addCategory("Categoria 1");
-    const index2 = listMessage.addCategory("Categoria 2");
+            // Teste de lista
+            if (message.text?.toLowerCase() === "lista") {
+                const listMsg = new ListMessage(message.chat, "Escolha um item:");
+                listMsg.setTitle("Menu Principal");
+                listMsg.setFooter("Toque para selecionar");
 
-    listMessage.addItem(index1, "Item 1");
-    listMessage.addItem(index1, "Item 2");
+                // Adicionar categorias e itens
+                listMsg.addCategory("Opções Principais");
+                listMsg.addItem(0, "Item 1", "Descrição do item 1", "item_1");
+                listMsg.addItem(0, "Item 2", "Descrição do item 2", "item_2");
+                listMsg.addItem(0, "Item 3", "Descrição do item 3", "item_3");
 
-    listMessage.addItem(index2, "Abc 1");
-    listMessage.addItem(index2, "Abc 2");
+                listMsg.addCategory("Opções Secundárias");
+                listMsg.addItem(1, "Opção A", "Descrição da opção A", "opt_a");
+                listMsg.addItem(1, "Opção B", "Descrição da opção B", "opt_b");
 
-    await client.send(listMessage);
-  }
+                await client.send(listMsg);
+                console.log("✅ Mensagem com lista enviada!");
+            }
 
-  if (message.text === "await") {
-    message.reply("Informe seu nome:");
+            // Teste de reação
+            if (message.text?.toLowerCase() === "reacao") {
+                await client.addReaction(message, "👍");
+                console.log("✅ Reação adicionada!");
+            }
 
-    const response = await client.awaitMessage(message.chat, { patterns: [MessageHandler.ignoreMessageFromMe] });
+            // Teste de tipagem
+            if (message.text?.toLowerCase() === "digitando") {
+                //await client.changeChatStatus(message.chat, 1); // ChatStatus.Typing = 1
+                await new Promise((resolve) => setTimeout(resolve, 3000));
+                await client.sendMessage(message.chat, "Pronto! 😄");
+                console.log("✅ Mensagem de tipagem enviada!");
+            }
 
-    const description = await client.getUserDescription(message.chat.id)
+            // Listar chats
+            if (message.text?.toLowerCase() === "chats") {
+                const chats = await client.getChats();
+                await client.sendMessage(
+                    message.chat,
+                    `Total de chats: ${chats.length}`
+                );
+            }
 
-    console.log(description)
+            // Informações do usuário
+            if (message.text?.toLowerCase() === "info") {
+                const user = await client.getUser(message.user);
+                const infoText = `
+📱 Informações do Usuário:
+ID: ${user?.id}
+Nome: ${user?.name}
+Salvo: ${user?.savedName ? "✅ Sim" : "❌ Não"}
+Descrição: ${user?.description || "Nenhuma"}
+        `.trim();
 
-    await message.reply(`Olá ${response.text}, tudo bem?\n\nSua descrição: ${description}`);
-  }
+                await client.sendMessage(message.chat, infoText);
+            }
 
-  if (message.text === "avatar") {
-    const userExample = {
-      _id: {
-        $oid: "685de25d95188f6eabed0a60"
-      },
-      id: "372a2ab8-2b57-4ebc-b4d5-8e04868f4f73",
-      name: "Felipe Andrade Junqueira",
-      email: "iamfelipeee123@gmail.com",
-      artistName: "KubitoFelipe",
-      bio: "FELEPO",
-      avatarUrl: "https://cdn.univermusic.com/cdn/uploads/image/cd3e5b94-b0fc-4509-b98a-69dbdb8dc93c.png",
-      status: "active",
-      createdAt: {
-        $date: "2025-06-27T00:14:21.491Z"
-      }
-    };
+            // Menu de ajuda
+            if (
+                message.text?.toLowerCase() === "ajuda" ||
+                message.text?.toLowerCase() === "menu"
+            ) {
+                const helpText = `
+🤖 Comandos disponíveis:
 
+📝 Mensagens:
+• oi - Resposta simples
+• botoes - Enviar mensagem com botões
+• lista - Enviar mensagem com lista
+• digitando - Simular digitação
 
+🎨 Interações:
+• reacao - Adicionar reação 👍
 
-    console.log(await generateProfileImage(userExample, 23, 1))
+📊 Informações:
+• chats - Mostrar total de chats
+• info - Mostrar info do usuário
+• ajuda - Mostrar este menu
+        `.trim();
 
-    message.reply(new ImageMessage(message.chat, "Avatar", await generateProfileImage(userExample, 23, 1)));
-  }
-
-  if (message.text === "product") {
-    // Exemplo de teste
-    const productExample = {
-      "_id": "685df96795188f6eabed0bf5",
-      "id": "6a746a43-f68c-45f9-b1fc-4f57810ed5d0",
-      "hash": "be72121a-0e04-4490-86d4-534237fead44",
-      "name": "AUTOMOTIVO TICTAC INSIGNE",
-      "description": "FL STUDIO PC",
-      "price": 100,
-      "imageUrl": "https://cdn.univermusic.com/cdn/uploads/image/0a9bfeb1-17a3-4126-8a77-68f5960fb9c2.jpg",
-      "category": "flp",
-      "artistId": "372a2ab8-2b57-4ebc-b4d5-8e04868f4f73",
-      "status": "approved",
-      "genre": "FUNK",
-      "bpm": 130,
-      "previewUrl": "https://cdn.univermusic.com/cdn/uploads/audio/151414c8-981f-4f2b-9304-bf93c1ceeef5.mp3",
-      "__v": 0,
-      "createdAt": "2025-06-30T19:47:14.562Z",
-      "updatedAt": "2025-08-13T19:09:50.883Z",
-      "collaborators": [
-        {
-          "id": "372a2ab8-2b57-4ebc-b4d5-8e04868f4f73",
-          "artistName": "KubitoFelipe",
-          "isMainArtist": true
-        },
-        {
-          "id": "ecbe541e-e1da-45bc-80b5-93fede5fa079",
-          "artistName": "Lekodj",
-          "isMainArtist": false,
-          "percentage": 50
+                await client.sendMessage(message.chat, helpText);
+            }
+        } catch (error) {
+            console.error("❌ Erro ao processar mensagem:", error);
         }
-      ],
-      "artistName": "KubitoFelipe"
-    };
+    });
 
-    const btnMessage = new ButtonMessage(message.chat, "texto", "rodapé");
+    client.on("error", (error) => {
+        console.error("❌ Erro:", error);
+    });
 
-    btnMessage.addReply("Ouvir prévia", "button-id-123");
+    client.connect(authPath)
+}
 
-    await client.send(btnMessage);
-
-    const respo = await client.awaitMessage(message.chat, { patterns: [MessageHandler.ignoreMessageFromMe] });
-
-    console.log("Resposta do botão:", respo);
-
-    message.reply(new ImageMessage(message.chat, "Product", await generateProductCard(productExample)));
-  }
+main().catch((error) => {
+    console.error("❌ Erro fatal:", error);
+    process.exit(1);
 });
-
-client.on('new-call', async (call) => {
-  console.info('Nova chamada:', call);
-
-  await call.reject();
-
-  await call.chat.send('Não aceitamos chamadas!');
-});
-
-client.on('error', (err: any) => {
-  console.info('Um erro ocorreu:', err);
-});
-
-(async () => {
-  //? Ao inserir o número do bot é ativado o pareamento por código
-  const botPhoneNumber = '11979882614';
-
-  await client.connect(
-    new MultiFileAuthState('./example/sessions/whatsapp', botPhoneNumber),
-  );
-})();

@@ -99,8 +99,9 @@ export default class ConvertWAMessage {
      */
     convertListMessage(content: WAMessageContent): void;
     /**
-     * * Converte uma mensagem de interativa
+     * * Converte uma mensagem de botão
      * @param content
+     * @returns
      */
     convertInteractiveMessage(content: WAMessageContent): void;
     static convertMessageStatus(status?: proto.WebMessageInfo.Status): MessageStatus;

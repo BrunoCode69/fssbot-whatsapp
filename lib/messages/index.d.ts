@@ -15,5 +15,4 @@ import EmptyMessage from "./EmptyMessage";
 import ErrorMessage from "./ErrorMessage";
 import FileMessage from "./FileMessage";
 import TextMessage from "./TextMessage";
-import CustomMessage from "./CustomMessage";
-export { MessageType, MessageStatus, MessagePlataform, Button, ButtonType, List, ListItem, PollAction, PollOption, AudioMessage, ButtonMessage, ContactMessage, EmptyMessage, FileMessage, ImageMessage, ListMessage, LocationMessage, MediaMessage, Message, ErrorMessage, PollMessage, PollUpdateMessage, ReactionMessage, StickerMessage, TextMessage, VideoMessage, CustomMessage, };
+export { MessageType, MessageStatus, MessagePlataform, Button, ButtonType, List, ListItem, PollAction, PollOption, AudioMessage, ButtonMessage, ContactMessage, EmptyMessage, FileMessage, ImageMessage, ListMessage, LocationMessage, MediaMessage, Message, ErrorMessage, PollMessage, PollUpdateMessage, ReactionMessage, StickerMessage, TextMessage, VideoMessage, };

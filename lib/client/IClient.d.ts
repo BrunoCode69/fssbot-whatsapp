@@ -5,12 +5,6 @@ import MediaMessage from "../messages/MediaMessage";
 import ChatStatus from "../modules/chat/ChatStatus";
 import Chat from "../modules/chat/Chat";
 import User from "../modules/user/User";
-import CommandController from "../modules/command/CommandController";
-import Command from "../modules/command/Command";
-import { QuickResponsePattern } from "../modules/quickResponse/QuickResponsePattern";
-import { QuickResponseReply } from "../modules/quickResponse/QuickResponseReply";
-import QuickResponseOptions from "../modules/quickResponse/QuickResponseOptions";
-import QuickResponse from "../modules/quickResponse/QuickResponse";
 import ClientEvents, { ClientEventsMap } from "./ClientEvents";
 import ClientFunctionHandler from "./ClientFunctionHandler";
 import IAuth from "./IAuth";
@@ -20,8 +14,6 @@ import Call from "../models/Call";
 export default interface IClient<Bot extends IBot = IBot> extends ClientEvents {
     /** Tratador de mensagens */
     messageHandler: MessageHandler;
-    /** Controlador de comandos  */
-    commandController: CommandController;
     /** Configuração */
     config: ConnectionConfig;
     /** Bot */
@@ -61,42 +53,6 @@ export default interface IClient<Bot extends IBot = IBot> extends ClientEvents {
      * * Aguarda a conexão for aberta.
      */
     awaitConnectionOpen(): Promise<void>;
-    /** @returns Controlador de comando do cliente */
-    getCommandController(): CommandController;
-    /** Define o controlador de comando do cliente */
-    setCommandController(controller: CommandController): void;
-    /** Define os comandos do bot
-     * @param commands Comandos que será injetado
-     */
-    setCommands(commands: Command[]): void;
-    /** @returns Retorna os comandos do bot */
-    getCommands(): void;
-    /** Adiciona um comando na lista de comandos
-     * @param command Comando que será adicionado
-     */
-    addCommand(command: Command): void;
-    /** Remove um comando na lista de comandos
-     * @param command Comando que será removido
-     */
-    removeCommand(command: Command): boolean;
-    /**
-     * Procura um comando no texto.
-     * @param text - Texto que contem o comando.
-     * */
-    searchCommand(text: string): Command | null;
-    /**
-     * Execução do comando.
-     * @param command - Comando que será executado.
-     * @param message - Mensagem associada ao comando.
-     */
-    runCommand(command: Command, message: Message, type?: string): any;
-    /** Adiciona uma resposta rápida */
-    addQuickResponse(pattern: QuickResponse): QuickResponse;
-    addQuickResponse(pattern: QuickResponsePattern, reply: QuickResponseReply, options?: Partial<QuickResponseOptions>): QuickResponse;
-    addQuickResponse(pattern: QuickResponsePattern[], reply: QuickResponseReply, options?: Partial<QuickResponseOptions>): QuickResponse;
-    addQuickResponse(content: QuickResponse | QuickResponsePattern | QuickResponsePattern[], reply?: QuickResponseReply, options?: Partial<QuickResponseOptions>): QuickResponse;
-    /** Remove uma resposta rápida */
-    removeQuickResponse(quickMessage: QuickResponse | string): void;
     /**
      * Deletar mensagem
      * @param message Mensagem que será deletada da sala de bate-papos

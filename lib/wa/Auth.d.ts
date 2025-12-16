@@ -5,8 +5,8 @@ export declare class MultiFileAuthState implements IAuth {
     folder: string;
     botPhoneNumber?: string;
     autoCreateDir: boolean;
-    fixFileName: (file?: string) => string | undefined;
-    getStat(folder: string): import("fs").Stats | null;
+    fixFileName: (file?: string) => string;
+    getStat(folder: string): import("fs").Stats;
     constructor(folder: string, botPhoneNumber?: string, autoCreateDir?: boolean);
     prepare(): void;
     get(file: string): Promise<any>;

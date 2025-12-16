@@ -51,7 +51,7 @@ export default function makeInMemoryStore({ logger: _logger, chatKey, labelAssoc
         [_: string]: {
             array: WAMessage[];
             dictCache: NodeCache;
-            get: (id: string) => WAMessage | undefined;
+            get: (id: string) => WAMessage;
             upsert: (item: WAMessage, mode: "append" | "prepend") => void;
             update: (item: WAMessage) => boolean;
             remove: (item: WAMessage) => boolean;
@@ -95,11 +95,11 @@ export default function makeInMemoryStore({ logger: _logger, chatKey, labelAssoc
      * @returns Label IDs
      **/
     getMessageLabels: (messageId: string) => string[];
-    loadMessage: (jid: string, id: string) => Promise<WAMessage | undefined>;
-    mostRecentMessage: (jid: string) => Promise<proto.IWebMessageInfo | undefined>;
-    fetchImageUrl: (jid: string, sock: WASocket) => Promise<string | null | undefined>;
+    loadMessage: (jid: string, id: string) => Promise<WAMessage>;
+    mostRecentMessage: (jid: string) => Promise<proto.IWebMessageInfo>;
+    fetchImageUrl: (jid: string, sock: WASocket) => Promise<string>;
     fetchGroupMetadata: (jid: string, sock: WASocket) => Promise<GroupMetadata>;
-    fetchMessageReceipts: ({ remoteJid, id }: WAMessageKey) => Promise<proto.IUserReceipt[] | null | undefined>;
+    fetchMessageReceipts: ({ remoteJid, id }: WAMessageKey) => Promise<proto.IUserReceipt[]>;
     toJSON: () => {
         chats: KeyedDB<Chat, string>;
         contacts: {
@@ -109,7 +109,7 @@ export default function makeInMemoryStore({ logger: _logger, chatKey, labelAssoc
             [_: string]: {
                 array: WAMessage[];
                 dictCache: NodeCache;
-                get: (id: string) => WAMessage | undefined;
+                get: (id: string) => WAMessage;
                 upsert: (item: WAMessage, mode: "append" | "prepend") => void;
                 update: (item: WAMessage) => boolean;
                 remove: (item: WAMessage) => boolean;

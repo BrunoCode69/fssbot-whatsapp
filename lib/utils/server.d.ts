@@ -25,7 +25,7 @@ export declare namespace ServerResponse {
         message: M;
         data: D;
     };
-    function send(response: Response, body: Body, options: BotServerOptions): Response<any, Record<string, any>> | undefined;
+    function send(response: Response, body: Body, options: BotServerOptions): Response<any, Record<string, any>>;
     function generate<M extends string, D extends any>(status: string | number, message: M, data: D): Body<M, D>;
     function generateError(err: any, status?: number | string, message?: string): Body<string, {
         error: string;

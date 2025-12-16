@@ -1,105 +1,127 @@
 import Message, { MessageType } from "./Message";
 import Chat from "../modules/chat/Chat";
-/** Lista - Formato atualizado para Baileys 7.x */
-export declare type List = {
-    /** Titulo da lista */
-    title: string;
-    /** Label da lista (highlight_label no novo formato) */
-    label?: string;
-    /** Itens da lista */
-    items: ListItem[];
-};
-/** Item da lista - Formato atualizado para Baileys 7.x */
-export declare type ListItem = {
-    /** Cabeçalho do item (header) */
-    header?: string;
-    /** Titulo do item (title) */
-    title: string;
-    /** Descrição do item (description) */
-    description: string;
-    /** Identificador do item (id) */
-    id: string;
-};
-/** Tipo da lista - Mantido para compatibilidade */
+/**
+ * Tipos de lista disponíveis
+ */
 export declare enum ListType {
+    /** Lista desconhecida/padrão */
     UNKNOWN = 0,
+    /** Lista com seleção única */
     SINGLE_SELECT = 1,
-    PRODUCT_LIST = 2
+    /** Lista com múltiplas seleções */
+    MULTI_SELECT = 2
 }
 /**
- * Representa uma mensagem de lista compatível com Baileys 7.x.
- * Agora usa Interactive Messages em vez de listMessage deprecated.
+ * Interface para um item da lista
+ */
+export interface ListItem {
+    /** ID do item */
+    id: string;
+    /** Título do item */
+    title: string;
+    /** Descrição do item (opcional) */
+    description?: string;
+    /** Cabeçalho do item (opcional) */
+    header?: string;
+}
+/**
+ * Interface para uma seção da lista
+ */
+export interface List {
+    /** Título da seção */
+    title: string;
+    /** Rótulo para destaque (opcional) */
+    label?: string;
+    /** Itens da seção */
+    items: ListItem[];
+}
+/**
+ * Representa uma mensagem com lista
  */
 export default class ListMessage extends Message {
-    /** O tipo da mensagem é sempre MessageType.List. */
-    readonly type = MessageType.List;
-    /** Lista de categorias e itens. */
+    /** O tipo da mensagem é MessageType.List */
+    readonly type: MessageType.List;
+    /** Lista de seções */
     list: List[];
-    /** Texto do botão associado à lista. */
-    button: string;
-    /** Texto do rodapé da lista. */
-    footer: string;
-    /** Título da lista. */
+    /** Título da mensagem */
     title: string;
-    /** Subtítulo da lista. */
-    subtitle: string;
-    /** Tipo da lista. Apenas disponível para o `WhatsAppBot`. */
-    listType: number;
-    /** Usa o modo interactive message. SEMPRE TRUE no Baileys 7.x (modo legado removido). */
-    readonly interactiveMode: boolean;
+    /** Rodapé da mensagem */
+    footer: string;
+    /** Texto do botão que abre a lista */
+    button: string;
+    /** Tipo da lista */
+    listType: ListType;
+    /** Se deve usar modo interativo (apenas Mobile) */
+    interactiveMode: boolean;
     /**
      * Cria uma nova instância de ListMessage.
-     * @param chat - O chat associado à mensagem de lista (opcional).
+     * @param chat - O chat associado à mensagem (opcional).
      * @param text - O texto da mensagem (opcional).
-     * @param button - Texto do botão (padrão é "Ver Opções").
-     * @param footer - Texto do rodapé (padrão é uma string vazia).
-     * @param title - Título da lista (padrão é uma string vazia).
-     * @param others - Outras propriedades da mensagem de lista (opcional).
+     * @param list - Lista de seções (padrão é uma lista vazia).
+     * @param others - Outras propriedades da mensagem (opcional).
      */
-    constructor(chat?: Chat | string, text?: string, button?: string, footer?: string, title?: string, others?: Partial<ListMessage>);
+    constructor(chat?: Chat | string, text?: string, list?: List[], others?: Partial<ListMessage>);
     /**
-     * Adiciona uma seção à lista.
-     * @param title - Título da categoria.
-     * @param label - Label da categoria (opcional).
-     * @param items - Itens da categoria (padrão é uma lista vazia).
-     * @returns O índice da categoria criada.
+     * Adiciona uma categoria/seção à lista
+     * @param title - Título da seção
+     * @param label - Rótulo para destaque (opcional)
      */
-    addCategory(title: string, items?: ListItem[], label?: string): number;
+    addCategory(title: string, label?: string): this;
     /**
-     * Adiciona um item a uma categoria existente na lista.
-     * @param index - Índice da categoria em que o item será adicionado.
-     * @param title - Título do item.
-     * @param description - Descrição do item (padrão é uma string vazia).
-     * @param id - ID do item (padrão é um timestamp em forma de string).
-     * @param header - Cabeçalho do item (opcional).
+     * Adiciona um item a uma seção da lista
+     * @param categoryIndex - Índice da seção
+     * @param title - Título do item
+     * @param description - Descrição do item (opcional)
+     * @param id - ID do item (opcional)
+     * @param header - Cabeçalho do item (opcional)
      */
-    addItem(index: number, title: string, description?: string, id?: string, header?: string): number;
+    addItem(categoryIndex: number, title: string, description?: string, id?: string, header?: string): this;
     /**
-     * Converte para o formato de Interactive Message do Baileys 7.x
-     * Este método é usado internamente pelo ConvertToWAMessage
+     * Remove um item de uma seção
+     * @param categoryIndex - Índice da seção
+     * @param item - Item a remover
      */
-    toInteractiveMessage(): any;
+    removeItem(categoryIndex: number, item: ListItem): this;
     /**
-     * Converte para o formato legado (para compatibilidade reversa)
-     * Este formato NÃO funciona mais no Baileys 7.x
-     * @deprecated Use toInteractiveMessage() em vez disso
+     * Define o título da mensagem
+     * @param title - Título
      */
-    toLegacyFormat(): any;
+    setTitle(title: string): this;
     /**
-     * Converte o objeto atual para uma representação em formato JSON.
-     * @returns Um objeto JSON que representa o estado atual do objeto.
+     * Define o rodapé da mensagem
+     * @param footer - Rodapé
+     */
+    setFooter(footer: string): this;
+    /**
+     * Define o texto do botão
+     * @param button - Texto do botão
+     */
+    setButton(button: string): this;
+    /**
+     * Define o tipo da lista
+     * @param type - Tipo da lista
+     */
+    setListType(type: ListType): this;
+    /**
+     * Habilita o modo interativo (apenas Mobile)
+     * @param enabled - Se deve habilitar
+     */
+    setInteractiveMode(enabled: boolean): this;
+    /**
+     * Serializa a mensagem em um objeto JSON.
+     * @returns O objeto JSON representando a mensagem.
      */
     toJSON(): any;
     /**
      * Desserializa um objeto JSON em uma instância de ListMessage.
-     * @param data - O objeto JSON a ser desserializado.
+     * @param message - O objeto JSON a ser desserializado.
      * @returns Uma instância de ListMessage.
      */
-    static fromJSON(data: any): ListMessage;
+    static fromJSON(message: any): ListMessage;
     /**
      * Verifica se um objeto é uma instância válida de ListMessage.
-     * @param message - O objeto a ser verificado como uma instância de ListMessage.
-     * @returns Verdadeiro se o objeto for uma instância válida de ListMessage, caso contrário, falso.
+     * @param message - O objeto a ser verificado.
+     * @returns `true` se for uma instância válida de ListMessage.
      */
     static isValid(message: any): message is ListMessage;
 }

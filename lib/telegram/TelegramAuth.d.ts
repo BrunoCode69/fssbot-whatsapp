@@ -5,8 +5,8 @@ export default class TelegramAuth implements IAuth {
     sessionsDir: string;
     botPhoneNumber?: string;
     autoCreateDir: boolean;
-    fixFileName: (file?: string) => string | undefined;
-    getStat(folder: string): import("fs").Stats | null;
+    fixFileName: (file?: string) => string;
+    getStat(folder: string): import("fs").Stats;
     setBotToken(botToken: string): void;
     constructor(botToken: string, sessionsDir?: string, autoCreateDir?: boolean);
     prepare(): void;

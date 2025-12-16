@@ -1,6 +1,6 @@
 import { Chat } from '../modules/chat';
 import { User } from '../modules/user';
-import { ClientUtils } from '../utils';
+import { ClientUtils } from '../utils/ClientUtils';
 import { injectJSON } from '../utils/Generic';
 
 export enum CallStatus {

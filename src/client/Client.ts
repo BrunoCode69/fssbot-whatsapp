@@ -1,5 +1,3 @@
-import type { AdvancedCommandStartOptions } from '../modules/command/advanced/AdvancedCommandStart';
-
 import { readFileSync } from 'fs';
 
 import ChatNotDefinedError from '../errors/ChatNotDefinedError';
@@ -11,20 +9,14 @@ import Message, { MessageStatus, MessageType } from '../messages/Message';
 import ErrorMessage from '../messages/ErrorMessage';
 import MediaMessage from '../messages/MediaMessage';
 import ReactionMessage from '../messages/ReactionMessage';
-import QuickResponseController from '../modules/quickResponse/QuickResponseController';
 
 import ChatStatus from '../modules/chat/ChatStatus';
 import Chat from '../modules/chat/Chat';
 import User from '../modules/user/User';
 
-import { CMDRunType } from '../modules/command/CommandEnums';
-import Command from '../modules/command/Command';
-import CommandController from '../modules/command/CommandController';
-
 import ClientEvents, { ClientEventsMap } from './ClientEvents';
 import IAuth from './IAuth';
 import IClient from './IClient';
-import ClientCluster from '../cluster/ClientCluster';
 import ClientFunctionHandler from './ClientFunctionHandler';
 
 import { BotStatus } from '../bot/BotStatus';
@@ -33,19 +25,10 @@ import BotBase from '../bot/BotBase';
 
 import { sleep, getError } from '../utils/Generic';
 import MessageHandler, { MessageHandlerConfig } from '../utils/MessageHandler';
-import {
-  QuickResponseOptions,
-  QuickResponsePattern,
-  QuickResponseReply,
-} from '../modules/quickResponse';
-import QuickResponse from '../modules/quickResponse/QuickResponse';
-import AdvancedCommandController from '../modules/command/advanced/AdvancedCommandController';
-import AdvancedCommand from '../modules/command/advanced/AdvancedCommand';
 import Call from '../models/Call';
 
 export default class Client<Bot extends IBot = IBot>
   extends ClientEvents
-  implements IClient
 {
   public funcHandler = new ClientFunctionHandler(this, {
     bot: [],
@@ -56,10 +39,6 @@ export default class Client<Bot extends IBot = IBot>
     sendMediaMessage: [],
     downloadMedia: [],
   });
-  public commandController: CommandController = new CommandController();
-  public advancedCommandController: AdvancedCommandController;
-  public quickResponseController: QuickResponseController =
-    new QuickResponseController();
   public messageHandler: MessageHandler = new MessageHandler();
   public reconnectTimes: number = 0;
 
@@ -73,7 +52,6 @@ export default class Client<Bot extends IBot = IBot>
     this.config = { ...DEFAULT_CONNECTION_CONFIG, ...config };
     this.id = Client.generateId();
     this.bot = bot;
-    this.advancedCommandController = new AdvancedCommandController(this.id);
 
     this.configEvents();
 
@@ -122,23 +100,6 @@ export default class Client<Bot extends IBot = IBot>
         if (this.messageHandler.resolveMessage(message)) return;
 
         this.emit('message', message);
-
-        if (this.config.disableAutoCommand) return;
-        if (this.config.disableAutoCommandForOldMessage && message.isOld)
-          return;
-        if (
-          this.config.disableAutoCommandForUnofficialMessage &&
-          message.isUnofficial
-        )
-          return;
-
-        await this.quickResponseController.searchAndExecute(message);
-
-        const command = this.searchCommand(message.text);
-
-        if (command != null) {
-          this.runCommand(command, message, CMDRunType.Exec);
-        }
       } catch (err) {
         this.emit('message', new ErrorMessage(message.chat, err));
       }
@@ -305,154 +266,7 @@ export default class Client<Bot extends IBot = IBot>
     }
   }
 
-  public getCommandController(): CommandController {
-    if (this.commandController.clientId != this.id) {
-      this.commandController.clientId = this.id;
-    }
 
-    if (this.commandController.botId != this.bot.id) {
-      this.commandController.botId = this.bot.id;
-    }
-
-    return this.commandController;
-  }
-
-  public setCommandController(controller: CommandController): void {
-    controller.botId = this.bot.id;
-    controller.clientId = this.id;
-
-    this.commandController = controller;
-  }
-
-  public setCommands(commands: Command[]) {
-    this.commandController.setCommands(commands);
-  }
-
-  public getCommands() {
-    return this.commandController.getCommands();
-  }
-
-  public addCommand(command: Command): void {
-    this.commandController.addCommand(command);
-  }
-
-  public removeCommand(command: Command): boolean {
-    return this.commandController.removeCommand(command);
-  }
-
-  public searchCommand(text: string): Command | null {
-    const command = this.commandController.searchCommand(text);
-
-    if (command == null) return null;
-
-    command.clientId = this.id;
-    command.botId = this.bot.id;
-
-    return command;
-  }
-
-  public runCommand(command: Command, message: Message, type?: string) {
-    return this.commandController.runCommand(command, message, type);
-  }
-
-  public setAdvancedCommandController(
-    advancedCommandController: AdvancedCommandController,
-  ) {
-    advancedCommandController.clientId = this.id;
-
-    this.advancedCommandController = advancedCommandController;
-  }
-
-  public getAdvancedCommandController(): AdvancedCommandController {
-    return this.advancedCommandController;
-  }
-
-  public setAdvancedCommands(commands: AdvancedCommand[]) {
-    this.advancedCommandController.setCommands(...commands);
-  }
-
-  public getAdvancedCommands() {
-    return this.advancedCommandController.getCommands();
-  }
-
-  public createAdvancedCommand<T extends object>(
-    id: string,
-    context: T,
-  ): AdvancedCommand<T> {
-    return this.advancedCommandController.createCommand({ id, context });
-  }
-
-  public addAdvancedCommand(command: AdvancedCommand): void {
-    this.advancedCommandController.addCommand(command);
-  }
-
-  public removeAdvancedCommand(command: AdvancedCommand): boolean {
-    return this.advancedCommandController.removeCommand(command);
-  }
-
-  public execAdvancedCommand(
-    command: AdvancedCommand | string,
-    message: Message,
-  ) {
-    if (typeof command == 'string') {
-      const cmd = this.advancedCommandController.getCommand(command);
-
-      if (!cmd) {
-        throw new Error('Command not found');
-      }
-
-      command = cmd;
-    }
-
-    const options: Partial<AdvancedCommandStartOptions<object>> = {
-      chatId: message.chat.id,
-      context: {
-        ...command.initialContext,
-        chatId: message.chat.id,
-        clientId: this.id,
-      },
-    };
-
-    return this.advancedCommandController.execCommand(
-      command.id,
-      message,
-      options,
-    );
-  }
-
-  public addQuickResponse(pattern: QuickResponse): QuickResponse;
-  public addQuickResponse(
-    pattern: QuickResponsePattern,
-    reply: QuickResponseReply,
-    options?: Partial<QuickResponseOptions>,
-  ): QuickResponse;
-  public addQuickResponse(
-    pattern: QuickResponsePattern[],
-    reply: QuickResponseReply,
-    options?: Partial<QuickResponseOptions>,
-  ): QuickResponse;
-  public addQuickResponse(
-    content: QuickResponse | QuickResponsePattern | QuickResponsePattern[],
-    reply?: QuickResponseReply,
-    options?: Partial<QuickResponseOptions>,
-  ): QuickResponse {
-    if (content instanceof QuickResponse) {
-      this.quickResponseController.add(content);
-
-      return content;
-    }
-
-    //@ts-ignore
-    const quickResponse = new QuickResponse(content, reply, options);
-
-    this.quickResponseController.add(quickResponse);
-
-    return quickResponse;
-  }
-
-  public removeQuickResponse(quickResponse: QuickResponse | string): void {
-    this.quickResponseController.remove(quickResponse);
-  }
 
   public deleteMessage(message: Message): Promise<void> {
     return this.funcHandler.exec('message', this.bot.deleteMessage, message);
@@ -1049,13 +863,6 @@ export default class Client<Bot extends IBot = IBot>
 
     if (id in clients && typeof clients[id] == 'object') {
       return clients[id];
-    }
-
-    if (
-      global['default-rompot-worker'] ||
-      global['rompot-cluster-save']?.worker
-    ) {
-      return ClientCluster.getClient(id);
     }
 
     return new Client(new BotBase());

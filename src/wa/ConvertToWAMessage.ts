@@ -20,7 +20,6 @@ import ImageMessage from '../messages/ImageMessage';
 import AudioMessage from '../messages/AudioMessage';
 import VideoMessage from '../messages/VideoMessage';
 import PollMessage from '../messages/PollMessage';
-import CustomMessage from '../messages/CustomMessage';
 
 import { getWaSticker } from '../utils/Libs';
 
@@ -120,7 +119,6 @@ export default class ConvertToWAMessage {
     if (ButtonMessage.isValid(message)) this.refactoryButtonMessage(message);
     if (ListMessage.isValid(message)) await this.refactoryListMessage(message);
     if (PollMessage.isValid(message)) this.refactoryPollMessage(message);
-    if (CustomMessage.isValid(message)) this.refactoryCustomMessage(message);
 
     return this;
   }
@@ -343,15 +341,14 @@ export default class ConvertToWAMessage {
       poll: {
         name: message.text,
         values: message.options.map((opt) => opt.name),
-        selectableCount: message.multipleAnswers ? message.options.length : 1,
+        selectableCount: 1,
       },
     };
   }
 
   /**
-   * * Refatora uma mensagem de botão
-   * OPÇÃO 1: Formato simples (NÃO FUNCIONA mais no Baileys 7.x)
-   * OPÇÃO 2: Usar baileys_helper (FUNCIONA, mas apenas no Mobile)
+   * * Refatora uma mensagem de botão com formato simples
+   * Converte para formato compatível com baileys
    * @param message
    */
   public refactoryButtonMessage(message: ButtonMessage) {
@@ -365,64 +362,29 @@ export default class ConvertToWAMessage {
       throw new Error('ButtonMessage suporta no máximo 3 botões');
     }
 
-    // =========================================
-    // OPÇÃO: Usar baileys_helper (recomendado)
-    // =========================================
-    // Marca para usar baileys_helper
-    this.isRelay = true;
-
     // Converte botões para formato baileys_helper
-    const interactiveButtons = message.buttons.map((button) => {
-      if (button.type === 'reply') {
-        return {
-          name: 'quick_reply',
-          buttonParamsJson: JSON.stringify({
-            display_text: button.text,
-            id: button.content,
-          }),
-        };
-      } else if (button.type === 'url') {
-        return {
-          name: 'cta_url',
-          buttonParamsJson: JSON.stringify({
-            display_text: button.text,
-            url: button.content,
-            merchant_url: button.content,
-          }),
-        };
-      } else if (button.type === 'call') {
-        return {
-          name: 'cta_call',
-          buttonParamsJson: JSON.stringify({
-            display_text: button.text,
-            phone_number: button.content,
-          }),
-        };
-      }
+    const buttons = message.buttons.map((button, index) => ({
+      name: 'quick_reply',
+      buttonParamsJson: JSON.stringify({
+        display_text: button.text,
+        id: button.content || `btn_${index}`,
+      }),
+    }));
 
-      // Fallback para quick_reply se tipo desconhecido
-      return {
-        name: 'quick_reply',
-        buttonParamsJson: JSON.stringify({
-          display_text: button.text,
-          id: button.content,
-        }),
-      };
-    });
-
-    // Usa baileys_helper (flag especial)
+    // Marca para usar baileys_helper e gera formato interativo
     this.waMessage = {
-      __useBaileysHelper: true, // Flag para detectar no método send()
+      __useBaileysHelper: true,
       text: message.text || '',
       footer: message.footer || undefined,
-      interactiveButtons: interactiveButtons,
+      interactiveButtons: buttons,
     };
+
+    this.isRelay = false;
   }
 
   /**
    * * Refatora uma mensagem de lista
-   * OPÇÃO 1: Formato simples compatível com Web e Mobile ✅ (RECOMENDADO)
-   * OPÇÃO 2: Formato interativo com baileys_helper (apenas Mobile)
+   * Converte para formato compatível com baileys_helper
    * @param message
    */
   public async refactoryListMessage(message: ListMessage) {
@@ -436,82 +398,34 @@ export default class ConvertToWAMessage {
       throw new Error('Lista deve ter pelo menos um item');
     }
 
-    // =========================================
-    // DECISÃO: Qual formato usar?
-    // =========================================
-
-    // Se interactiveMode está habilitado, usa baileys_helper (APENAS MOBILE)
-    if (message.interactiveMode) {
-      this.isRelay = true;
-
-      // Converte para formato baileys_helper
-      const listButton = {
-        name: 'single_select',
-        buttonParamsJson: JSON.stringify({
-          title: message.button || 'Ver Opções',
-          sections: message.list.map((list: List) => {
-            return {
-              title: list.title,
-              highlight_label: list.label || undefined,
-              rows: list.items.map((item: ListItem) => {
-                return {
-                  header: item.header || undefined,
-                  title: item.title,
-                  description: item.description || undefined,
-                  id: item.id,
-                };
-              }),
-            };
-          }),
-        }),
-      };
-
-      // Usa baileys_helper (flag especial)
-      this.waMessage = {
-        __useBaileysHelper: true, // Flag para detectar no método send()
-        text: message.text || '',
-        title: message.title || undefined,
-        footer: message.footer || undefined,
-        interactiveButtons: [listButton],
-      };
-
-      return;
-    }
-
-    // =========================================
-    // Formato SIMPLES (compatível Web + Mobile) ✅
-    // =========================================
-    this.waMessage = {
-      text: message.text || '',
-      footer: message.footer || undefined,
-      title: message.title || undefined,
-      buttonText: message.button || 'Ver Opções',
-      sections: message.list.map((list: List) => {
-        return {
+    // Converte para formato baileys_helper
+    const listButton = {
+      name: 'single_select',
+      buttonParamsJson: JSON.stringify({
+        title: message.button || 'Ver Opções',
+        sections: message.list.map((list: List) => ({
           title: list.title,
-          rows: list.items.map((item: ListItem) => {
-            return {
-              title: item.title,
-              description: item.description || undefined,
-              rowId: item.id,
-            };
-          }),
-        };
+          highlight_label: list.label || undefined,
+          rows: list.items.map((item: ListItem) => ({
+            header: item.header || undefined,
+            title: item.title,
+            description: item.description || undefined,
+            id: item.id,
+          })),
+        })),
       }),
     };
 
-    // Não precisa de relay para o formato simples
+    // Marca para usar baileys_helper
+    this.waMessage = {
+      __useBaileysHelper: true,
+      text: message.text || '',
+      title: message.title || undefined,
+      footer: message.footer || undefined,
+      interactiveButtons: [listButton],
+    };
+
     this.isRelay = false;
-  }
-
-  /**
-   * * Refatora uma mensagem customizada
-   * @param message
-   */
-  public async refactoryCustomMessage(message: CustomMessage) {
-    delete this.waMessage['text'];
-
-    Object.assign(this.waMessage, message.content);
   }
 
   public static convertToWaMessageStatus(

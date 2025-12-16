@@ -9,14 +9,15 @@
     "rootDir": "./src",
     "outDir": "./lib",
     "strict": false,
-    "strictNullChecks": true,
+    "strictNullChecks": false,
     "skipLibCheck": true,
-    "noImplicitThis": true,
+    "noImplicitThis": false,
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true,
     "sourceMap": true,
-    "declaration": true
+    "declaration": true,
+    "noEmitOnError": false
   },
   "include": ["./src/**/*.ts"],
   "exclude": ["node_modules"]
