@@ -19,6 +19,8 @@ import {
   proto,
 } from 'baileys';
 
+import { getLIDFromMessage } from './ID';
+
 // Importação de tipos e funções necessárias
 import { Comparable } from '@adiwajshing/keyed-db/lib/Types';
 
@@ -313,15 +315,35 @@ export default function makeInMemoryStore({
           case 'append':
           case 'notify':
             for (const msg of newMessages) {
+              // Extrai LID se disponível, caso contrário usa JID normalizado
+              const lid = getLIDFromMessage(msg.key);
               const jid = jidNormalizedUser(msg.key.remoteJid!);
-              const list = assertMessageList(jid);
+
+              // Usa LID como chave preferencial, fallback para JID
+              const storeKey = lid || jid;
+
+              // DEDUPLICAÇÃO: Verifica se a mensagem já existe em qualquer formato
+              const messageId = msg.key.id;
+              if (messageId) {
+                // Verifica em ambos os formatos (JID e LID)
+                const existsInJid = messages[jid]?.get(messageId);
+                const existsInLid = lid ? messages[lid]?.get(messageId) : null;
+
+                if (existsInJid || existsInLid) {
+                  // Mensagem já existe, pula duplicação
+                  logger?.trace({ jid: storeKey, id: messageId }, 'message already exists, skipping duplicate');
+                  continue;
+                }
+              }
+
+              const list = assertMessageList(storeKey);
               list.upsert(msg, 'append');
 
               if (type === 'notify') {
-                if (!chats.get(jid)) {
+                if (!chats.get(storeKey)) {
                   ev.emit('chats.upsert', [
                     {
-                      id: jid,
+                      id: storeKey,
                       conversationTimestamp: toNumber(msg.messageTimestamp),
                       unreadCount: 1,
                     },
@@ -491,10 +513,10 @@ export default function makeInMemoryStore({
     mostRecentMessage: async (jid: string) => {
       const messageList = messages[jid];
       if (!messageList) return undefined;
-      
+
       const keys = messageList.dictCache.keys();
       if (keys.length === 0) return undefined;
-      
+
       const message = messageList.get(keys.slice(-1)[0]) as proto.IWebMessageInfo;
       return message;
     },

@@ -162,21 +162,21 @@ export default class ConfigWAEvents {
 
           if (
             message.message?.protocolMessage?.type ==
-              proto.Message.ProtocolMessage.Type.EPHEMERAL_SYNC_RESPONSE ||
+            proto.Message.ProtocolMessage.Type.EPHEMERAL_SYNC_RESPONSE ||
             message.message?.protocolMessage?.type ==
-              proto.Message.ProtocolMessage.Type.APP_STATE_SYNC_KEY_SHARE ||
+            proto.Message.ProtocolMessage.Type.APP_STATE_SYNC_KEY_SHARE ||
             message.message?.protocolMessage?.type ==
-              proto.Message.ProtocolMessage.Type.APP_STATE_SYNC_KEY_REQUEST ||
+            proto.Message.ProtocolMessage.Type.APP_STATE_SYNC_KEY_REQUEST ||
             message.message?.protocolMessage?.type ==
-              proto.Message.ProtocolMessage.Type
-                .APP_STATE_FATAL_EXCEPTION_NOTIFICATION ||
+            proto.Message.ProtocolMessage.Type
+              .APP_STATE_FATAL_EXCEPTION_NOTIFICATION ||
             message.message?.protocolMessage?.type ==
-              proto.Message.ProtocolMessage.Type.EPHEMERAL_SETTING ||
+            proto.Message.ProtocolMessage.Type.EPHEMERAL_SETTING ||
             message.message?.protocolMessage?.type ==
-              proto.Message.ProtocolMessage.Type.HISTORY_SYNC_NOTIFICATION ||
+            proto.Message.ProtocolMessage.Type.HISTORY_SYNC_NOTIFICATION ||
             message.message?.protocolMessage?.type ==
-              proto.Message.ProtocolMessage.Type
-                .INITIAL_SECURITY_NOTIFICATION_SETTING_SYNC
+            proto.Message.ProtocolMessage.Type
+              .INITIAL_SECURITY_NOTIFICATION_SETTING_SYNC
           ) {
             return; // Not read empty messages
           }
@@ -213,9 +213,9 @@ export default class ConfigWAEvents {
             message.key.fromMe
               ? this.wa.id
               : message.key.participant ||
-                  message.participant ||
-                  message.key.remoteJid ||
-                  '',
+              message.participant ||
+              message.key.remoteJid ||
+              '',
           );
 
           await this.wa.updateUser({
@@ -223,7 +223,7 @@ export default class ConfigWAEvents {
             name: message.pushName || message.verifiedBizName || undefined,
           });
 
-          const msg = await new ConvertWAMessage(this.wa, message, type).get();
+          const msg = await new ConvertWAMessage(this.wa, message as any, type).get();
 
           if (msg.fromMe && msg.isUnofficial) {
             await this.wa.updateChat({ id: msg.chat.id, unreadCount: 0 });

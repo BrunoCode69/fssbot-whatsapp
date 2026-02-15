@@ -71,8 +71,17 @@ export default class ConvertToWAMessage {
   public async refactory(message = this.message): Promise<this> {
     this.waMessage = await this.refactoryMessage(message);
 
-    // Normaliza o chatId
-    const normalizedChatId = this.safeNormalizeJid(message.chat.id);
+    // Normaliza o chatId e resolve para LID se disponível
+    let normalizedChatId = this.safeNormalizeJid(message.chat.id);
+
+    // Tenta resolver para LID usando o mapper
+    if (normalizedChatId) {
+      const resolvedLid = this.bot.lidMapper.resolve(normalizedChatId);
+      if (resolvedLid && resolvedLid.includes('@lid')) {
+        normalizedChatId = resolvedLid;
+      }
+    }
+
     if (!normalizedChatId) {
       throw new Error(`Invalid chat ID: ${message.chat.id}`);
     }

@@ -6,7 +6,7 @@ import WhatsAppBot, { WhatsAppBotConfig } from "./WhatsAppBot";
 
 export * from "./Auth";
 export * from "./ID";
-export * from "./makeInMemoryStore";
+export * from "./LIDMapper";
 export * from "./WAMessage";
 export * from "./WAModule";
 export * from "./WAStatus";

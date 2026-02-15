@@ -8,6 +8,7 @@ import makeInMemoryStore from './makeInMemoryStore';
 import { Media } from '../messages/MediaMessage';
 import { UserAction } from '../modules/user';
 import ConfigWAEvents from './ConfigWAEvents';
+import { LIDMapper } from './LIDMapper';
 import { BotStatus } from '../bot/BotStatus';
 import BotEvents from '../bot/BotEvents';
 import ChatStatus from '../modules/chat/ChatStatus';
@@ -49,18 +50,30 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     lastConnectionUpdateDate: number;
     checkConnectionInterval: NodeJS.Timer | null;
     configEvents: ConfigWAEvents;
+    lidMapper: LIDMapper;
     constructor(config?: Partial<WhatsAppBotConfig>);
     /**
-     * Normaliza um JID para o formato correto do Baileys 7.x
-     * Usa o jidNormalizedUser oficial do Baileys
-     * @param jid - JID a ser normalizado
-     * @returns JID normalizado ou undefined se inválido
+     * Normaliza um JID/LID para o formato correto do Baileys 7.x
+     * PRIORIZA LID sobre JID quando disponível
+     * @param jid - JID ou LID a ser normalizado
+     * @param lid - LID alternativo (de remoteJidAlt, por exemplo)
+     * @returns Identificador normalizado (preferencialmente LID)
      */
     private safeNormalizeJid;
     /**
-     * Normaliza um array de JIDs
+     * Normaliza um array de JIDs/LIDs
      */
     private safeNormalizeJids;
+    /**
+     * Extrai e mapeia LID de uma mensagem WAMessage
+     * Usa remoteJidAlt quando disponível (Baileys 6.8.0+)
+     * @param message - Mensagem WAMessage ou objeto com key
+     * @returns Objeto com id (preferencial) e lid (se disponível)
+     */
+    extractAndMapLID(message: any): {
+        id: string;
+        lid?: string;
+    };
     connect(auth?: string | IAuth): Promise<void>;
     internalConnect(additionalOptions?: Partial<WhatsAppBot['config']>): Promise<void>;
     reconnect(stopEvents?: boolean, showOpen?: boolean): Promise<void>;

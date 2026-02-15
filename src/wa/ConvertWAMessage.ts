@@ -25,7 +25,7 @@ import ChatType from "../modules/chat/ChatType";
 import WhatsAppBot from "./WhatsAppBot";
 import User from "../modules/user/User";
 import Chat from "../modules/chat/Chat";
-import { fixID } from "./ID";
+import { fixID, getLIDFromMessage } from "./ID";
 
 export default class ConvertWAMessage {
   public type?: MessageUpsertType;
@@ -116,11 +116,31 @@ export default class ConvertWAMessage {
     this.message.fromMe = !!this.waMessage.key.fromMe;
     this.message.id = this.message.id || this.waMessage.key.id || "";
 
-    this.message.chat = new Chat(fixID(waMessage?.key?.remoteJid || this.bot.id));
+    // Extrai LID/JID da mensagem usando o método do bot
+    const { id: chatId, lid: chatLid } = this.bot.extractAndMapLID(waMessage);
+
+    this.message.chat = new Chat(fixID(chatId, chatLid));
     this.message.chat.type = isJidGroup(this.message.chat.id) ? ChatType.Group : ChatType.PV;
     this.message.status = ConvertWAMessage.convertMessageStatus(ConvertWAMessage.isMessageUpdate(waMessage) ? waMessage.update.status! : waMessage.status!);
 
-    this.message.user = new User(fixID(waMessage.key.fromMe ? this.bot.id : waMessage.key.participant || waMessage.participant || waMessage.key.remoteJid || ""));
+    // Para user, considera participant em grupos
+    let userId: string;
+    let userLid: string | undefined;
+
+    if (waMessage.key.fromMe) {
+      userId = this.bot.id;
+    } else {
+      // Em grupos, participant pode ter LID
+      const participantId = waMessage.key.participant || waMessage.participant;
+      if (participantId) {
+        userLid = getLIDFromMessage({ participant: participantId });
+        userId = participantId;
+      } else {
+        userId = waMessage.key.remoteJid || '';
+      }
+    }
+
+    this.message.user = new User(fixID(userId, userLid || chatLid));
   }
 
   /**
@@ -225,9 +245,11 @@ export default class ConvertWAMessage {
     }
 
     if (context.quotedMessage) {
+      const { id: quotedChatId, lid: quotedLid } = this.bot.extractAndMapLID(this.waMessage);
+
       const message = {
         key: {
-          remoteJid: fixID(this.waMessage?.key?.remoteJid || this.bot.id),
+          remoteJid: fixID(quotedChatId, quotedLid),
           participant: context.participant,
           id: context.stanzaId,
         },
@@ -533,7 +555,7 @@ export default class ConvertWAMessage {
     listMSG.title = listMessage.title || "";
     listMSG.footer = listMessage.footerText || "";
     listMSG.button = listMessage.buttonText || "";
-    
+
     // Converte o listType, usando UNKNOWN como padrão
     const listType = listMessage.listType as number;
     if (listType in ListType) {

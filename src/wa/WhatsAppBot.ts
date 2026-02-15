@@ -38,7 +38,8 @@ import ConvertWAMessage from './ConvertWAMessage';
 import { Media } from '../messages/MediaMessage';
 import { UserAction, UserEvent } from '../modules/user';
 import ConfigWAEvents from './ConfigWAEvents';
-import { fixID, getPhoneNumber } from './ID';
+import { fixID, getPhoneNumber, getLIDFromMessage } from './ID';
+import { LIDMapper } from './LIDMapper';
 import { BotStatus } from '../bot/BotStatus';
 import ChatType from '../modules/chat/ChatType';
 import BotEvents from '../bot/BotEvents';
@@ -96,6 +97,7 @@ export default class WhatsAppBot extends BotEvents implements IBot {
 
   public checkConnectionInterval: NodeJS.Timer | null = null;
   public configEvents: ConfigWAEvents = new ConfigWAEvents(this);
+  public lidMapper: LIDMapper = new LIDMapper();
 
   constructor(config?: Partial<WhatsAppBotConfig>) {
     super();
@@ -162,39 +164,88 @@ export default class WhatsAppBot extends BotEvents implements IBot {
   // ============================================
 
   /**
-   * Normaliza um JID para o formato correto do Baileys 7.x
-   * Usa o jidNormalizedUser oficial do Baileys
-   * @param jid - JID a ser normalizado
-   * @returns JID normalizado ou undefined se inválido
+   * Normaliza um JID/LID para o formato correto do Baileys 7.x
+   * PRIORIZA LID sobre JID quando disponível
+   * @param jid - JID ou LID a ser normalizado
+   * @param lid - LID alternativo (de remoteJidAlt, por exemplo)
+   * @returns Identificador normalizado (preferencialmente LID)
    */
-  private safeNormalizeJid(jid: string | undefined): string | undefined {
+  private safeNormalizeJid(jid: string | undefined, lid?: string): string | undefined {
     if (!jid || typeof jid !== 'string') return undefined;
 
     try {
-      // Se já tem @, usa jidNormalizedUser
+      // 1. Se temos LID explícito, usa ele
+      if (lid && lid.includes('@lid')) {
+        const resolved = this.lidMapper.resolve(lid);
+        // Registra o mapeamento se temos ambos
+        if (jid && !jid.includes('@lid')) {
+          this.lidMapper.register(lid, jid);
+        }
+        return resolved;
+      }
+
+      // 2. Se o JID já é um LID, usa ele
+      if (jid.includes('@lid')) {
+        return this.lidMapper.resolve(jid);
+      }
+
+      // 3. Tenta encontrar LID correspondente ao JID
+      const mappedLid = this.lidMapper.getLID(jid);
+      if (mappedLid) {
+        return mappedLid;
+      }
+
+      // 4. Fallback: normaliza como JID tradicional
       if (jid.includes('@')) {
         return jidNormalizedUser(jid);
       }
 
-      // Se é só número, adiciona @s.whatsapp.net primeiro
+      // 5. Se é só número, adiciona @s.whatsapp.net
       if (/^\d+$/.test(jid)) {
         return jidNormalizedUser(`${jid}@s.whatsapp.net`);
       }
 
       return undefined;
     } catch (error) {
-      this.logger?.error?.('Error normalizing JID:', jid, error);
+      this.logger?.error?.('Error normalizing JID/LID:', jid, lid, error);
       return undefined;
     }
   }
 
   /**
-   * Normaliza um array de JIDs
+   * Normaliza um array de JIDs/LIDs
    */
   private safeNormalizeJids(jids: string[]): string[] {
     return jids
       .map((jid) => this.safeNormalizeJid(jid))
       .filter((jid): jid is string => jid !== undefined);
+  }
+
+  /**
+   * Extrai e mapeia LID de uma mensagem WAMessage
+   * Usa remoteJidAlt quando disponível (Baileys 6.8.0+)
+   * @param message - Mensagem WAMessage ou objeto com key
+   * @returns Objeto com id (preferencial) e lid (se disponível)
+   */
+  public extractAndMapLID(message: any): { id: string; lid?: string } {
+    const key = message.key || {};
+
+    // Extrai LID de participant (grupos) ou remoteJid
+    const lid = getLIDFromMessage(key);
+
+    // Extrai JID tradicional
+    let jid = key.remoteJid || '';
+
+    // Se temos ambos, registra o mapeamento
+    if (lid && jid && !jid.includes('@lid')) {
+      this.lidMapper.register(lid, jid);
+    }
+
+    // Retorna o identificador preferencial (LID se disponível)
+    return {
+      id: lid || jid,
+      lid: lid || undefined
+    };
   }
 
   // ============================================
@@ -216,7 +267,7 @@ export default class WhatsAppBot extends BotEvents implements IBot {
       });
 
       if (!this.sock?.authState?.creds?.registered) {
-        await this.sock.waitForConnectionUpdate((update) => !!update.qr);
+        await this.sock.waitForConnectionUpdate(async (update) => !!update.qr);
 
         const code = await this.sock.requestPairingCode(
           this.auth.botPhoneNumber,
@@ -883,7 +934,8 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     const normalizedId = this.safeNormalizeJid(user.id);
     if (!normalizedId) return '';
 
-    return (await this.sock.fetchStatus(normalizedId))?.status || '';
+    const result = await this.sock.fetchStatus(normalizedId) as any;
+    return (Array.isArray(result) ? result[0]?.status : result?.status) || '';
   }
 
   public async setUserDescription(

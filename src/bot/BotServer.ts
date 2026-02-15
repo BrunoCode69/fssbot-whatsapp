@@ -117,7 +117,7 @@ export function generateBotServerBase(
 
     async sendAll(body: ServerRequest.Body) {
       await Promise.all(
-        Object.values(this.webhooks).map(async (webhook) => {
+        Object.values(this.webhooks).map(async (webhook: BotWebhook) => {
           try {
             const exists = await this.pingWebhook(webhook.id);
 
