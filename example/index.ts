@@ -1,5 +1,5 @@
-import { Client, Message, TextMessage, ButtonMessage, ListMessage, Chat } from "../src";
-import { MultiFileAuthState, WhatsAppBot } from "../src/wa";
+import { Client, Message, TextMessage, ButtonMessage, ListMessage, Chat } from "../lib";
+import { MultiFileAuthState, WhatsAppBot } from "../lib/wa";
 
 async function main() {
     console.log("🚀 Iniciando cliente WhatsApp...");
