@@ -84,10 +84,9 @@ describe('Telegram inline button keyboard', () => {
     const message = new ButtonMessage('-100123', 'Choose');
     message.addReply('Help', 'help');
 
-    expect(createButtonSendOptions(message)).toEqual({
-      reply_markup: {
-        inline_keyboard: [[{ text: 'Help', callback_data: 'help' }]],
-      },
+    const options = createButtonSendOptions(message);
+    expect(JSON.parse(options.reply_markup as string)).toEqual({
+      inline_keyboard: [[{ text: 'Help', callback_data: 'help' }]],
     });
   });
 });

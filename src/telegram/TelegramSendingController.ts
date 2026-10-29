@@ -28,6 +28,12 @@ export default class TelegramSendingController {
 
   public async send(message: Message): Promise<Message> {
     if (ButtonMessage.isValid(message)) {
+      console.info('[Telegram buttons] dispatching ButtonMessage', {
+        type: message.type,
+        chatId: message.chat?.id,
+        buttonCount: message.buttons?.length || 0,
+        labels: message.buttons?.map((button) => button.text) || [],
+      });
       return await this.sendButtonMessage(message);
     }
 
@@ -111,6 +117,12 @@ export default class TelegramSendingController {
     if (message.footer) {
       message.text = `${message.text || ''}\n\n${message.footer}`;
     }
+
+    console.info('[Telegram buttons] sending inline keyboard', {
+      chatId: message.chat.id,
+      textLength: String(message.text || '').length,
+      keyboard: options.reply_markup,
+    });
 
     const telegramMessage = await this.telegram.bot.sendMessage(
       Number(message.chat.id),

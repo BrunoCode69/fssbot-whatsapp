@@ -16,5 +16,5 @@ export function createInlineKeyboard(message: ButtonMessage): TelegramBotAPI.Inl
 }
 
 export function createButtonSendOptions(message: ButtonMessage): TelegramBotAPI.SendMessageOptions {
-  return { reply_markup: createInlineKeyboard(message) };
+  return { reply_markup: JSON.stringify(createInlineKeyboard(message)) as any };
 }
