@@ -1,3 +1,5 @@
+import { fixID } from './ID';
+
 export function getPollCreationContent(messageContent: any): any | undefined {
   return messageContent?.pollCreationMessage
     || messageContent?.pollCreationMessageV2
@@ -6,4 +8,29 @@ export function getPollCreationContent(messageContent: any): any | undefined {
     || messageContent?.pollCreationMessageV4?.message?.pollCreationMessage
     || messageContent?.pollCreationMessageV4?.message?.pollCreationMessageV2
     || messageContent?.pollCreationMessageV4?.message?.pollCreationMessageV3;
+}
+
+export function getPollVoterId(message: any, botId: string): string {
+  if (message?.key?.fromMe) return fixID(botId);
+  const key = message?.key || {};
+  return fixID(
+    key.participantAlt
+      || message?.participantAlt
+      || key.participant
+      || message?.participant
+      || key.remoteJidAlt
+      || message?.remoteJidAlt
+      || key.remoteJid
+      || '',
+  );
+}
+
+export function getPollVoteChange(previousVotes: string[], currentVotes: string[]): { action: 'add' | 'remove'; option: string } | undefined {
+  const addedOption = currentVotes.find((option) => !previousVotes.includes(option));
+  if (addedOption) return { action: 'add', option: addedOption };
+
+  const removedOption = previousVotes.find((option) => !currentVotes.includes(option));
+  if (removedOption) return { action: 'remove', option: removedOption };
+
+  return undefined;
 }

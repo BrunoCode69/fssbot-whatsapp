@@ -28,7 +28,7 @@ import Chat from "../modules/chat/Chat";
 import { fixID, getLIDFromMessage, getPhoneNumber } from "./ID";
 import { extractInteractiveListSelection } from './list-selection';
 import { createReactionMessageData } from './reaction-message-data';
-import { getPollCreationContent } from './poll-content';
+import { getPollCreationContent, getPollVoterId, getPollVoteChange } from './poll-content';
 
 export default class ConvertWAMessage {
   public type?: MessageUpsertType;
@@ -456,7 +456,7 @@ export default class ConvertWAMessage {
     const pollUpdate = PollUpdateMessage.fromJSON({ ...this.message, type: MessageType.PollUpdate, text: pollCreation?.text || '' });
     pollUpdate.extra.pollCreationMessageId = pollMessageId;
 
-    const userId = fixID(this.waMessage.key.fromMe ? this.bot.id : this.waMessage.key.participant || this.waMessage.participant || this.waMessage.key.remoteJid || "");
+    const userId = getPollVoterId(this.waMessage, this.bot.id);
 
     if (pollCreation) {
       const poll = decryptPollVote(content.vote!, {
@@ -483,28 +483,10 @@ export default class ConvertWAMessage {
         }
       }
 
-      let vote: PollOption | null = null;
-
-      const avaibleVotes = Object.keys(votesAlias);
-
-      for (const name of avaibleVotes) {
-        if (nowVotes.length > oldVotes.length) {
-          if (oldVotes.includes(name) || !nowVotes.includes(name)) continue;
-
-          vote = votesAlias[name];
-
-          pollUpdate.action = PollAction.Add;
-
-          break;
-        } else {
-          if (nowVotes.includes(name) || !oldVotes.includes(name)) continue;
-
-          vote = votesAlias[name];
-
-          pollUpdate.action = PollAction.Remove;
-
-          break;
-        }
+      const voteChange = getPollVoteChange(oldVotes, nowVotes);
+      const vote: PollOption | null = voteChange ? votesAlias[voteChange.option] || null : null;
+      if (voteChange) {
+        pollUpdate.action = voteChange.action === 'add' ? PollAction.Add : PollAction.Remove;
       }
 
       pollUpdate.selected = vote?.id || "";

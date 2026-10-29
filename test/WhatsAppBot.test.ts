@@ -6,8 +6,9 @@ import { createReactionKey } from '../src/wa/reaction-key';
 import { createReactionMessageData } from '../src/wa/reaction-message-data';
 import { createInteractiveListPayload } from '../src/wa/interactive-list-payload';
 import { extractInteractiveListSelection } from '../src/wa/list-selection';
-import { getPollCreationContent } from '../src/wa/poll-content';
+import { getPollCreationContent, getPollVoterId, getPollVoteChange } from '../src/wa/poll-content';
 import ListMessage from '../src/messages/ListMessage';
+import PollMessage from '../src/messages/PollMessage';
 
 describe('WhatsApp LID handling', () => {
   test('keeps a group destination when the sender uses a LID', () => {
@@ -150,6 +151,31 @@ describe('WhatsApp poll creation variants', () => {
 
     expect(getPollCreationContent({ pollCreationMessageV3: poll })).toBe(poll);
     expect(getPollCreationContent({ pollCreationMessage: poll })).toBe(poll);
+  });
+
+  test('preserves the poll secret key through JSON persistence', () => {
+    const poll = new PollMessage('120@g.us', 'Question');
+    poll.secretKey = Buffer.from(Array.from({ length: 32 }, (_, index) => index + 1));
+
+    const persisted = JSON.parse(JSON.stringify(poll.toJSON()));
+    const restored = PollMessage.fromJSON(persisted);
+
+    expect(restored.secretKey).toEqual(poll.secretKey);
+  });
+
+  test('uses the alternate participant JID for vote decryption when available', () => {
+    expect(getPollVoterId({
+      key: {
+        remoteJid: '120@g.us',
+        participant: '12345@lid',
+        participantAlt: '5511999999999:4@s.whatsapp.net',
+      },
+    }, 'bot@s.whatsapp.net')).toBe('5511999999999@s.whatsapp.net');
+  });
+
+  test('detects an added option when a voter switches their single-choice vote', () => {
+    expect(getPollVoteChange(['Hello'], ['Hey'])).toEqual({ action: 'add', option: 'Hey' });
+    expect(getPollVoteChange(['Hello'], [])).toEqual({ action: 'remove', option: 'Hello' });
   });
 });
 
