@@ -10,14 +10,16 @@ import VideoMessage from '../messages/VideoMessage';
 import TextMessage from '../messages/TextMessage';
 import FileMessage from '../messages/FileMessage';
 import PollMessage from '../messages/PollMessage';
+import ButtonMessage from '../messages/ButtonMessage';
 import Message from '../messages/Message';
-import TelegramBot from './TelegramBot';
+import type TelegramBot from './TelegramBot';
 export default class TelegramSendingController {
     telegram: TelegramBot;
     constructor(telegram: TelegramBot);
     send(message: Message): Promise<Message>;
     sendMessage(message: Message): Promise<Message>;
     sendText(message: TextMessage): Promise<Message>;
+    sendButtonMessage(message: ButtonMessage): Promise<Message>;
     sendReaction(message: ReactionMessage): Promise<Message>;
     sendContact(message: ContactMessage): Promise<Message>;
     sendLocation(message: LocationMessage): Promise<Message>;

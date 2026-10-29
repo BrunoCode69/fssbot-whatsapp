@@ -5,6 +5,7 @@ export default class TelegramEvents {
     telegram: TelegramBot;
     constructor(telegram: TelegramBot);
     configAll(): void;
+    configCallbackQueries(): void;
     configMessage(): void;
     configNewChatMembers(): void;
     configLeftChatMember(): void;
