@@ -14,10 +14,10 @@ export function getPollVoterId(message: any, botId: string): string {
   return String(
     key.participantAlt
       || message?.participantAlt
-      || key.participant
-      || message?.participant
       || key.remoteJidAlt
       || message?.remoteJidAlt
+      || key.participant
+      || message?.participant
       || key.remoteJid
       || '',
   );
@@ -29,10 +29,10 @@ export function getPollCreatorJid(message: any, botId: string): string {
   return String(
     key.participantAlt
       || message?.participantAlt
-      || key.participant
-      || message?.participant
       || key.remoteJidAlt
       || message?.remoteJidAlt
+      || key.participant
+      || message?.participant
       || key.remoteJid
       || '',
   );

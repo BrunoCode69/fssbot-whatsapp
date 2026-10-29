@@ -173,6 +173,16 @@ describe('WhatsApp poll creation variants', () => {
     }, 'bot@s.whatsapp.net')).toBe('5511999999999:4@s.whatsapp.net');
   });
 
+  test('matches Baileys author precedence when participant and remote JID alternates coexist', () => {
+    expect(getPollVoterId({
+      key: {
+        remoteJid: '120363412654066582@g.us',
+        remoteJidAlt: '5511999999999:4@s.whatsapp.net',
+        participant: '46609488420874@lid',
+      },
+    }, 'bot@s.whatsapp.net')).toBe('5511999999999:4@s.whatsapp.net');
+  });
+
   test('preserves the raw poll creator device JID used by Baileys encryption', () => {
     expect(getPollCreatorJid({ key: { fromMe: true } }, '5511999999999:7@s.whatsapp.net'))
       .toBe('5511999999999:7@s.whatsapp.net');
