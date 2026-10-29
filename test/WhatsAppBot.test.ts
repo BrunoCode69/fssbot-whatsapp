@@ -9,6 +9,8 @@ import { extractInteractiveListSelection } from '../src/wa/list-selection';
 import { getPollCreationContent, getPollCreatorJid, getPollVoterId, getPollVoteChange } from '../src/wa/poll-content';
 import ListMessage from '../src/messages/ListMessage';
 import PollMessage from '../src/messages/PollMessage';
+import Message from '../src/messages/Message';
+import { BufferJSON } from 'baileys';
 
 describe('WhatsApp LID handling', () => {
   test('keeps a group destination when the sender uses a LID', () => {
@@ -161,6 +163,27 @@ describe('WhatsApp poll creation variants', () => {
     const restored = PollMessage.fromJSON(persisted);
 
     expect(restored.secretKey).toEqual(poll.secretKey);
+  });
+
+  test('preserves poll options, secret, and creator metadata through Rompot auth serialization', () => {
+    const poll = new PollMessage('120@g.us', 'Question');
+    poll.id = 'poll-id';
+    poll.user.id = '558173146435:3@s.whatsapp.net';
+    poll.extra.pollCreatorJid = '558173146435:3@s.whatsapp.net';
+    poll.addOption('Hello', 'hello-id');
+    poll.addOption('Hey', 'hey-id');
+    poll.secretKey = Buffer.from(Array.from({ length: 32 }, (_, index) => index + 1));
+
+    const persisted = JSON.parse(JSON.stringify(poll.toJSON(), BufferJSON.replacer), BufferJSON.reviver);
+    const restored = PollMessage.fromJSON(persisted);
+
+    const requiredMessageKeys = Object.keys(new Message());
+    const missingMessageKeys = requiredMessageKeys.filter((key) => !(key in persisted));
+    expect(missingMessageKeys).toEqual(['mention']);
+    expect(PollMessage.isValid(persisted)).toBe(true);
+    expect(restored.options).toEqual(poll.options);
+    expect(restored.secretKey).toEqual(poll.secretKey);
+    expect(restored.extra.pollCreatorJid).toBe(poll.extra.pollCreatorJid);
   });
 
   test('uses the alternate participant JID for vote decryption when available', () => {

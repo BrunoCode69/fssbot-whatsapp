@@ -133,6 +133,8 @@ export default class PollMessage extends Message {
    * @returns `true` se o objeto for uma instância válida de PollMessage, caso contrário, `false`.
    */
   public static isValid(message: any): message is PollMessage {
-    return Message.isValid(message) && (message?.type == MessageType.Poll || message?.type == MessageType.PollUpdate);
+    const hasMessageShape = Message.isValid(message)
+      || (message && typeof message === 'object' && Message.isValid({ ...message, mention: message.mention }));
+    return hasMessageShape && (message?.type == MessageType.Poll || message?.type == MessageType.PollUpdate);
   }
 }
