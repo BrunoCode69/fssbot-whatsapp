@@ -16,7 +16,8 @@ import Message from '../messages/Message';
 
 import TelegramToRompotConverter from './TelegramToRompotConverter';
 import { TelegramUtils } from './TelegramUtils';
-import TelegramBot from './TelegramBot';
+import type TelegramBot from './TelegramBot';
+import { createButtonSendOptions } from './inline-keyboard';
 
 export default class TelegramSendingController {
   public telegram: TelegramBot;
@@ -102,21 +103,11 @@ export default class TelegramSendingController {
   }
 
   public async sendButtonMessage(message: ButtonMessage): Promise<Message> {
-    const inlineKeyboard = message.buttons.map((button) => {
-      if (button.type === 'reply') {
-        return [{ text: button.text, callback_data: button.content }];
-      }
-      if (button.type === 'url') {
-        return [{ text: button.text, url: button.content }];
-      }
-      throw new Error(`O botão do tipo "${button.type}" não é suportado pelo Telegram. Use botões de resposta ou URL.`);
-    });
-    if (inlineKeyboard.length === 0) {
+    if (message.buttons.length === 0) {
       throw new Error('Adicione ao menos um botão antes de enviar a mensagem.');
     }
 
-    const options = TelegramSendingController.getOptions(message) as TelegramBotAPI.SendMessageOptions;
-    options.reply_markup = { inline_keyboard: inlineKeyboard };
+    const options = createButtonSendOptions(message);
     if (message.footer) {
       message.text = `${message.text || ''}\n\n${message.footer}`;
     }

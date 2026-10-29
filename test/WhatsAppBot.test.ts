@@ -11,6 +11,8 @@ import ListMessage from '../src/messages/ListMessage';
 import PollMessage from '../src/messages/PollMessage';
 import Message from '../src/messages/Message';
 import { BufferJSON } from 'baileys';
+import ButtonMessage from '../src/messages/ButtonMessage';
+import { createButtonSendOptions, createInlineKeyboard } from '../src/telegram/inline-keyboard';
 
 describe('WhatsApp LID handling', () => {
   test('keeps a group destination when the sender uses a LID', () => {
@@ -62,6 +64,31 @@ describe('Telegram anonymous admin attribution', () => {
     } as any;
 
     expect(TelegramUtils.isAnonymousGroupAdminMessage(message)).toBe(false);
+  });
+});
+
+describe('Telegram inline button keyboard', () => {
+  test('builds reply and URL buttons in Telegram inline keyboard format', () => {
+    const message = new ButtonMessage('-100123', 'Choose');
+    message.addReply('Help', 'help').addUrl('Docs', 'https://example.com');
+
+    expect(createInlineKeyboard(message)).toEqual({
+      inline_keyboard: [
+        [{ text: 'Help', callback_data: 'help' }],
+        [{ text: 'Docs', url: 'https://example.com' }],
+      ],
+    });
+  });
+
+  test('creates clean sendMessage options with reply_markup only', () => {
+    const message = new ButtonMessage('-100123', 'Choose');
+    message.addReply('Help', 'help');
+
+    expect(createButtonSendOptions(message)).toEqual({
+      reply_markup: {
+        inline_keyboard: [[{ text: 'Help', callback_data: 'help' }]],
+      },
+    });
   });
 });
 
