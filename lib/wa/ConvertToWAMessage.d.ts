@@ -8,7 +8,7 @@ import StickerMessage from '../messages/StickerMessage';
 import ButtonMessage from '../messages/ButtonMessage';
 import MediaMessage from '../messages/MediaMessage';
 import PollMessage from '../messages/PollMessage';
-import WhatsAppBot from './WhatsAppBot';
+import type WhatsAppBot from './WhatsAppBot';
 export default class ConvertToWAMessage {
     message: Message;
     bot: WhatsAppBot;

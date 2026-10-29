@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { extractAndMapLID, fixID } from '../src/wa/ID';
 import { LIDMapper } from '../src/wa/LIDMapper';
 import { TelegramUtils } from '../src/telegram/TelegramUtils';
+import { createReactionKey } from '../src/wa/reaction-key';
 
 describe('WhatsApp LID handling', () => {
   test('keeps a group destination when the sender uses a LID', () => {
@@ -53,6 +54,40 @@ describe('Telegram anonymous admin attribution', () => {
     } as any;
 
     expect(TelegramUtils.isAnonymousGroupAdminMessage(message)).toBe(false);
+  });
+});
+
+describe('WhatsApp group reaction keys', () => {
+  test('omits participant when reacting to the bot own sent message', () => {
+    expect(createReactionKey(
+      '120@g.us',
+      'message-id',
+      true,
+      '5511999999999@s.whatsapp.net',
+      '5511999999999@s.whatsapp.net',
+      true,
+    )).toEqual({
+      remoteJid: '120@g.us',
+      id: 'message-id',
+      fromMe: true,
+      participant: undefined,
+    });
+  });
+
+  test('keeps participant when reacting to another group member message', () => {
+    expect(createReactionKey(
+      '120@g.us',
+      'message-id',
+      false,
+      '5511888888888@s.whatsapp.net',
+      '5511999999999@s.whatsapp.net',
+      true,
+    )).toEqual({
+      remoteJid: '120@g.us',
+      id: 'message-id',
+      fromMe: false,
+      participant: '5511888888888@s.whatsapp.net',
+    });
   });
 });
 

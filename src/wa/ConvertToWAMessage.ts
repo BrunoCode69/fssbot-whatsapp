@@ -24,6 +24,7 @@ import PollMessage from '../messages/PollMessage';
 import { getWaSticker } from '../utils/Libs';
 
 import { fixID, getID, getPhoneNumber } from './ID';
+import { createReactionKey } from './reaction-key';
 import type WhatsAppBot from './WhatsAppBot';
 
 export default class ConvertToWAMessage {
@@ -321,20 +322,19 @@ export default class ConvertToWAMessage {
     const normalizedChatId = this.safeNormalizeJid(message.chat.id);
     const normalizedUserId = this.safeNormalizeJid(message.user.id);
     const normalizedBotId = this.safeNormalizeJid(this.bot.id);
+    const reactionKey = createReactionKey(
+      normalizedChatId || message.chat.id,
+      message.id,
+      message.fromMe,
+      normalizedUserId,
+      normalizedBotId,
+      !!normalizedChatId && isJidGroup(normalizedChatId),
+    );
 
     this.waMessage = {
       react: {
         key: {
-          remoteJid: normalizedChatId || message.chat.id,
-          id: message.id || '',
-          fromMe:
-            message.fromMe || !normalizedUserId
-              ? true
-              : normalizedUserId == normalizedBotId,
-          participant:
-            normalizedChatId && isJidGroup(normalizedChatId)
-              ? normalizedUserId || this.bot.id
-              : undefined,
+          ...reactionKey,
           toJSON: () => this,
         },
         text: message.text,
