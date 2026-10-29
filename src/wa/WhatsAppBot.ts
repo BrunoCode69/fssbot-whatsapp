@@ -284,6 +284,7 @@ export default class WhatsAppBot extends BotEvents implements IBot {
           ...this.config,
         });
 
+        this.sock.ev.on('creds.update', saveCreds);
         this.store.bind(this.sock.ev);
 
         this.configEvents.configureAll();
@@ -291,8 +292,6 @@ export default class WhatsAppBot extends BotEvents implements IBot {
         resolve();
 
         await this.awaitConnectionState('open');
-
-        this.sock.ev.on('creds.update', saveCreds);
       } catch (err) {
         this.ev.emit('error', err);
       }

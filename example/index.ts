@@ -31,7 +31,11 @@ async function main() {
         console.error("❌ Erro:", error);
     });
 
-    client.connect(new MultiFileAuthState('session', '5516988747166'))
+    client.on("open", () => {
+        console.log("✅ Conexão estabelecida com sucesso!");
+    })
+
+    client.connect(new MultiFileAuthState('session'))
 }
 
 main().catch((error) => {
