@@ -55,3 +55,4 @@ describe('Telegram anonymous admin attribution', () => {
     expect(TelegramUtils.isAnonymousGroupAdminMessage(message)).toBe(false);
   });
 });
+

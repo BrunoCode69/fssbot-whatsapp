@@ -309,6 +309,7 @@ export default class Client<Bot extends IBot = IBot>
       this.bot.addReaction,
       new ReactionMessage(message.chat, reaction, message, {
         user: message.user,
+        fromMe: message.fromMe,
       }),
     );
   }
@@ -317,7 +318,10 @@ export default class Client<Bot extends IBot = IBot>
     return this.funcHandler.exec(
       'message',
       this.bot.removeReaction,
-      new ReactionMessage(message.chat, '', message, { user: message.user }),
+      new ReactionMessage(message.chat, '', message, {
+        user: message.user,
+        fromMe: message.fromMe,
+      }),
     );
   }
 

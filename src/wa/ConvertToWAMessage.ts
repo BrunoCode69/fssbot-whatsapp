@@ -24,7 +24,7 @@ import PollMessage from '../messages/PollMessage';
 import { getWaSticker } from '../utils/Libs';
 
 import { fixID, getID, getPhoneNumber } from './ID';
-import WhatsAppBot from './WhatsAppBot';
+import type WhatsAppBot from './WhatsAppBot';
 
 export default class ConvertToWAMessage {
   public message: Message;
@@ -320,6 +320,7 @@ export default class ConvertToWAMessage {
   public refactoryReactionMessage(message: ReactionMessage) {
     const normalizedChatId = this.safeNormalizeJid(message.chat.id);
     const normalizedUserId = this.safeNormalizeJid(message.user.id);
+    const normalizedBotId = this.safeNormalizeJid(this.bot.id);
 
     this.waMessage = {
       react: {
@@ -329,7 +330,7 @@ export default class ConvertToWAMessage {
           fromMe:
             message.fromMe || !normalizedUserId
               ? true
-              : normalizedUserId == this.bot.id,
+              : normalizedUserId == normalizedBotId,
           participant:
             normalizedChatId && isJidGroup(normalizedChatId)
               ? normalizedUserId || this.bot.id
