@@ -6,7 +6,7 @@ import { createReactionKey } from '../src/wa/reaction-key';
 import { createReactionMessageData } from '../src/wa/reaction-message-data';
 import { createInteractiveListPayload } from '../src/wa/interactive-list-payload';
 import { extractInteractiveListSelection } from '../src/wa/list-selection';
-import { getPollCreationContent, getPollVoterId, getPollVoteChange } from '../src/wa/poll-content';
+import { getPollCreationContent, getPollCreatorJid, getPollVoterId, getPollVoteChange } from '../src/wa/poll-content';
 import ListMessage from '../src/messages/ListMessage';
 import PollMessage from '../src/messages/PollMessage';
 
@@ -170,7 +170,12 @@ describe('WhatsApp poll creation variants', () => {
         participant: '12345@lid',
         participantAlt: '5511999999999:4@s.whatsapp.net',
       },
-    }, 'bot@s.whatsapp.net')).toBe('5511999999999@s.whatsapp.net');
+    }, 'bot@s.whatsapp.net')).toBe('5511999999999:4@s.whatsapp.net');
+  });
+
+  test('preserves the raw poll creator device JID used by Baileys encryption', () => {
+    expect(getPollCreatorJid({ key: { fromMe: true } }, '5511999999999:7@s.whatsapp.net'))
+      .toBe('5511999999999:7@s.whatsapp.net');
   });
 
   test('detects an added option when a voter switches their single-choice vote', () => {

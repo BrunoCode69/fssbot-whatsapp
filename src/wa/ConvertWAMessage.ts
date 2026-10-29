@@ -28,7 +28,7 @@ import Chat from "../modules/chat/Chat";
 import { fixID, getLIDFromMessage, getPhoneNumber } from "./ID";
 import { extractInteractiveListSelection } from './list-selection';
 import { createReactionMessageData } from './reaction-message-data';
-import { getPollCreationContent, getPollVoterId, getPollVoteChange } from './poll-content';
+import { getPollCreationContent, getPollCreatorJid, getPollVoterId, getPollVoteChange } from './poll-content';
 
 export default class ConvertWAMessage {
   public type?: MessageUpsertType;
@@ -444,10 +444,16 @@ export default class ConvertWAMessage {
       }
     }
 
+    pollMessage.extra.pollCreatorJid = getPollCreatorJid(
+      this.waMessage,
+      this.bot.sock.user?.id || this.bot.id,
+    );
+
     this.message = pollMessage;
     console.info('[Rompot poll] creation converted', {
       pollId,
       protocolVariant: Object.keys(normalizeMessageContent(this.waMessage.message) || {}).find((key) => /^pollCreationMessage/.test(key)),
+      pollCreatorJid: pollMessage.extra.pollCreatorJid,
       optionCount: pollMessage.options.length,
       optionNames: pollMessage.options.map((option) => option.name),
       secretKeyLength: pollMessage.secretKey?.length,
@@ -465,11 +471,14 @@ export default class ConvertWAMessage {
     pollUpdate.extra.pollCreationMessageId = pollMessageId;
 
     const userId = getPollVoterId(this.waMessage, this.bot.id);
+    const pollCreatorJid = pollCreation?.extra?.pollCreatorJid
+      || (pollCreation?.fromMe ? this.bot.sock.user?.id || this.bot.id : pollCreation?.user?.id || '');
 
     console.info('[Rompot poll] vote update received', {
       eventMessageId: this.waMessage.key.id,
       pollMessageId,
       pollFound: PollMessage.isValid(pollCreation) && pollCreation.type === MessageType.Poll,
+      pollCreatorJid,
       pollOptionCount: pollCreation?.options?.length || 0,
       secretKeyLength: pollCreation?.secretKey?.length || 0,
       voterId: userId,
@@ -480,7 +489,7 @@ export default class ConvertWAMessage {
       let poll: proto.Message.IPollVoteMessage;
       try {
         poll = decryptPollVote(content.vote!, {
-          pollCreatorJid: pollCreation.user.id,
+          pollCreatorJid,
           pollMsgId: content?.pollCreationMessageKey?.id || "",
           pollEncKey: pollCreation.secretKey,
           voterJid: userId,
@@ -488,6 +497,7 @@ export default class ConvertWAMessage {
       } catch (error) {
         console.error('[Rompot poll] vote decryption failed', {
           pollMessageId,
+          pollCreatorJid,
           voterId: userId,
           secretKeyLength: pollCreation.secretKey?.length || 0,
           error: error instanceof Error ? error.message : String(error),

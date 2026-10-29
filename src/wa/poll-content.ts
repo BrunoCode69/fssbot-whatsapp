@@ -1,5 +1,3 @@
-import { fixID } from './ID';
-
 export function getPollCreationContent(messageContent: any): any | undefined {
   return messageContent?.pollCreationMessage
     || messageContent?.pollCreationMessageV2
@@ -11,9 +9,24 @@ export function getPollCreationContent(messageContent: any): any | undefined {
 }
 
 export function getPollVoterId(message: any, botId: string): string {
-  if (message?.key?.fromMe) return fixID(botId);
+  if (message?.key?.fromMe) return botId;
   const key = message?.key || {};
-  return fixID(
+  return String(
+    key.participantAlt
+      || message?.participantAlt
+      || key.participant
+      || message?.participant
+      || key.remoteJidAlt
+      || message?.remoteJidAlt
+      || key.remoteJid
+      || '',
+  );
+}
+
+export function getPollCreatorJid(message: any, botId: string): string {
+  if (message?.key?.fromMe) return botId;
+  const key = message?.key || {};
+  return String(
     key.participantAlt
       || message?.participantAlt
       || key.participant
