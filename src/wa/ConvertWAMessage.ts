@@ -28,6 +28,7 @@ import Chat from "../modules/chat/Chat";
 import { fixID, getLIDFromMessage, getPhoneNumber } from "./ID";
 import { extractInteractiveListSelection } from './list-selection';
 import { createReactionMessageData } from './reaction-message-data';
+import { getPollCreationContent } from './poll-content';
 
 export default class ConvertWAMessage {
   public type?: MessageUpsertType;
@@ -216,10 +217,6 @@ export default class ConvertWAMessage {
       this.convertInteractiveResponseMessage(messageContent![contentType]);
     }
 
-    if (contentType === "interactiveResponseMessage") {
-      this.convertInteractiveResponseMessage(messageContent![contentType]);
-    }
-
     if (contentType === "locationMessage") {
       this.convertLocationMessage(messageContent![contentType]);
     }
@@ -232,8 +229,9 @@ export default class ConvertWAMessage {
       this.convertReactionMessage(messageContent![contentType]);
     }
 
-    if (contentType === "pollCreationMessage") {
-      await this.convertPollCreationMessage(messageContent![contentType] as proto.Message.PollCreationMessage);
+    const pollCreationContent = getPollCreationContent(messageContent);
+    if (pollCreationContent) {
+      await this.convertPollCreationMessage(pollCreationContent as proto.Message.PollCreationMessage);
     }
 
     if (contentType == "pollUpdateMessage") {
@@ -455,7 +453,7 @@ export default class ConvertWAMessage {
   public async convertPollUpdateMessage(content: proto.Message.PollUpdateMessage) {
     const pollMessageId = content?.pollCreationMessageKey?.id || this.waMessage.key.id || "";
     const pollCreation = await this.bot.getPollMessage(pollMessageId);
-    const pollUpdate = PollUpdateMessage.fromJSON({ ...this.message, type: MessageType.PollUpdate, text: pollCreation.text });
+    const pollUpdate = PollUpdateMessage.fromJSON({ ...this.message, type: MessageType.PollUpdate, text: pollCreation?.text || '' });
     pollUpdate.extra.pollCreationMessageId = pollMessageId;
 
     const userId = fixID(this.waMessage.key.fromMe ? this.bot.id : this.waMessage.key.participant || this.waMessage.participant || this.waMessage.key.remoteJid || "");

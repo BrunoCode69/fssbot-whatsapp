@@ -6,6 +6,7 @@ import { createReactionKey } from '../src/wa/reaction-key';
 import { createReactionMessageData } from '../src/wa/reaction-message-data';
 import { createInteractiveListPayload } from '../src/wa/interactive-list-payload';
 import { extractInteractiveListSelection } from '../src/wa/list-selection';
+import { getPollCreationContent } from '../src/wa/poll-content';
 import ListMessage from '../src/messages/ListMessage';
 
 describe('WhatsApp LID handling', () => {
@@ -140,6 +141,15 @@ describe('WhatsApp helper-based list payload', () => {
         paramsJson: JSON.stringify({ id: 'option_1' }),
       },
     })).toBe('option_1');
+  });
+});
+
+describe('WhatsApp poll creation variants', () => {
+  test('recognizes the pollCreationMessageV3 used for single-select polls', () => {
+    const poll = { name: 'Hello World', options: [{ optionName: 'Hello' }] };
+
+    expect(getPollCreationContent({ pollCreationMessageV3: poll })).toBe(poll);
+    expect(getPollCreationContent({ pollCreationMessage: poll })).toBe(poll);
   });
 });
 
