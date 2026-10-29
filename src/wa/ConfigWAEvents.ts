@@ -3,6 +3,8 @@ import {
   MessageUpsertType,
   WACallEvent,
   isJidGroup,
+  getContentType,
+  normalizeMessageContent,
   proto,
 } from 'baileys';
 import { Boom } from '@hapi/boom';
@@ -125,6 +127,24 @@ export default class ConfigWAEvents {
           if (!message) return;
           if (message.key.remoteJid == 'status@broadcast') return;
 
+          const normalizedContent = normalizeMessageContent(message.message);
+          const incomingContentType = getContentType(normalizedContent);
+          const incomingPollUpdate = (normalizedContent as any)?.pollUpdateMessage;
+          const isPollUpdate = incomingContentType === 'pollUpdateMessage' || Boolean(incomingPollUpdate);
+          if (isPollUpdate) {
+            console.info('[Rompot poll] raw vote update received', {
+              upsertType: type,
+              eventMessageId: message.key.id,
+              chatId: message.key.remoteJid,
+              contentType: incomingContentType,
+              pollCreationMessageId: incomingPollUpdate?.pollCreationMessageKey?.id,
+              hasVotePayload: Boolean(incomingPollUpdate?.vote?.encPayload?.length && incomingPollUpdate?.vote?.encIv?.length),
+              hasParticipant: Boolean(message.key.participant || message.participant),
+              hasAlternateParticipant: Boolean((message.key as any).participantAlt || (message as any).participantAlt),
+              fromMe: Boolean(message.key.fromMe),
+            });
+          }
+
           if (!message.message) {
             if (
               !(
@@ -181,7 +201,15 @@ export default class ConfigWAEvents {
             return; // Not read empty messages
           }
 
-          if (this.wa.messagesCached.includes(message.key.id!)) return;
+          if (this.wa.messagesCached.includes(message.key.id!)) {
+            if (isPollUpdate) {
+              console.warn('[Rompot poll] raw vote update skipped as duplicate', {
+                eventMessageId: message.key.id,
+                pollCreationMessageId: incomingPollUpdate?.pollCreationMessageKey?.id,
+              });
+            }
+            return;
+          }
 
           this.wa.addMessageCache(message.key.id!);
 
@@ -225,12 +253,34 @@ export default class ConfigWAEvents {
 
           const msg = await new ConvertWAMessage(this.wa, message as any, type).get();
 
+          if (isPollUpdate) {
+            console.info('[Rompot poll] adapter emitted vote event', {
+              type: msg.type,
+              eventMessageId: msg.id,
+              chatId: msg.chat?.id,
+              pollCreationMessageId: msg.extra?.pollCreationMessageId,
+              action: (msg as any).action,
+              selected: msg.selected,
+              text: msg.text,
+              voterIdPresent: Boolean(msg.user?.id),
+            });
+          }
+
           if (msg.fromMe && msg.isUnofficial) {
             await this.wa.updateChat({ id: msg.chat.id, unreadCount: 0 });
           }
 
           this.wa.emit('message', msg);
         } catch (err) {
+          const normalizedContent = normalizeMessageContent(message?.message);
+          const failedPollUpdate = (normalizedContent as any)?.pollUpdateMessage;
+          if (failedPollUpdate) {
+            console.error('[Rompot poll] raw vote update conversion failed', {
+              eventMessageId: message?.key?.id,
+              pollCreationMessageId: failedPollUpdate.pollCreationMessageKey?.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
           this.wa.emit(
             'message',
             new ErrorMessage(

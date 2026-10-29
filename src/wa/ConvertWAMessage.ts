@@ -431,7 +431,8 @@ export default class ConvertWAMessage {
    * @param content
    */
   public async convertPollCreationMessage(content: proto.Message.PollCreationMessage) {
-    const pollCreation = await this.bot.getPollMessage(this.waMessage.key.id || "");
+    const pollId = this.waMessage.key.id || '';
+    const pollCreation = await this.bot.getPollMessage(pollId);
 
     const pollMessage = PollMessage.fromJSON({ ...this.message, type: MessageType.Poll, text: content.name });
 
@@ -444,6 +445,13 @@ export default class ConvertWAMessage {
     }
 
     this.message = pollMessage;
+    console.info('[Rompot poll] creation converted', {
+      pollId,
+      protocolVariant: Object.keys(normalizeMessageContent(this.waMessage.message) || {}).find((key) => /^pollCreationMessage/.test(key)),
+      optionCount: pollMessage.options.length,
+      optionNames: pollMessage.options.map((option) => option.name),
+      secretKeyLength: pollMessage.secretKey?.length,
+    });
   }
 
   /**
@@ -458,13 +466,34 @@ export default class ConvertWAMessage {
 
     const userId = getPollVoterId(this.waMessage, this.bot.id);
 
+    console.info('[Rompot poll] vote update received', {
+      eventMessageId: this.waMessage.key.id,
+      pollMessageId,
+      pollFound: PollMessage.isValid(pollCreation) && pollCreation.type === MessageType.Poll,
+      pollOptionCount: pollCreation?.options?.length || 0,
+      secretKeyLength: pollCreation?.secretKey?.length || 0,
+      voterId: userId,
+      votePayloadPresent: Boolean(content?.vote?.encPayload?.length && content?.vote?.encIv?.length),
+    });
+
     if (pollCreation) {
-      const poll = decryptPollVote(content.vote!, {
-        pollCreatorJid: pollCreation.user.id,
-        pollMsgId: content?.pollCreationMessageKey?.id || "",
-        pollEncKey: pollCreation.secretKey,
-        voterJid: userId,
-      });
+      let poll: proto.Message.IPollVoteMessage;
+      try {
+        poll = decryptPollVote(content.vote!, {
+          pollCreatorJid: pollCreation.user.id,
+          pollMsgId: content?.pollCreationMessageKey?.id || "",
+          pollEncKey: pollCreation.secretKey,
+          voterJid: userId,
+        });
+      } catch (error) {
+        console.error('[Rompot poll] vote decryption failed', {
+          pollMessageId,
+          voterId: userId,
+          secretKeyLength: pollCreation.secretKey?.length || 0,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
 
       const votesAlias: { [name: string]: PollOption } = {};
       const hashVotes: string[] = poll.selectedOptions.map((opt) => Buffer.from(opt).toString("hex").toUpperCase()).sort();
@@ -492,12 +521,33 @@ export default class ConvertWAMessage {
       pollUpdate.selected = vote?.id || "";
       pollUpdate.text = vote?.name || "";
 
+      console.info('[Rompot poll] vote decoded', {
+        pollMessageId,
+        voterId: userId,
+        selectedHashCount: hashVotes.length,
+        previousOptions: oldVotes,
+        currentOptions: nowVotes,
+        action: pollUpdate.action,
+        selectedOptionId: pollUpdate.selected,
+        selectedOptionName: pollUpdate.text,
+      });
+
       pollCreation.setUserVotes(userId, nowVotes);
 
       await this.bot.savePollMessage(pollCreation);
+    } else {
+      console.error('[Rompot poll] poll creation record missing', { pollMessageId });
     }
 
     this.message = pollUpdate;
+    console.info('[Rompot poll] vote update converted', {
+      type: this.message.type,
+      chatId: this.message.chat?.id,
+      pollMessageId: this.message.extra.pollCreationMessageId,
+      action: (this.message as any).action,
+      selected: this.message.selected,
+      text: this.message.text,
+    });
   }
 
   /**

@@ -537,6 +537,14 @@ export default class WhatsAppBot extends BotEvents implements IBot {
   ): Promise<PollMessage | PollUpdateMessage> {
     const pollMessage = await this.auth.get(`polls-${pollMessageId}`);
 
+    console.info('[Rompot poll] storage lookup', {
+      pollMessageId,
+      found: Boolean(pollMessage),
+      type: pollMessage?.type,
+      optionCount: pollMessage?.options?.length || 0,
+      secretKeyLength: pollMessage?.secretKey?.length || 0,
+    });
+
     if (!pollMessage || !PollMessage.isValid(pollMessage))
       return PollMessage.fromJSON({ id: pollMessageId });
 
@@ -551,6 +559,13 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     pollMessage: PollMessage | PollUpdateMessage,
   ): Promise<void> {
     await this.auth.set(`polls-${pollMessage.id}`, pollMessage.toJSON());
+    console.info('[Rompot poll] storage saved', {
+      pollMessageId: pollMessage.id,
+      type: pollMessage.type,
+      optionCount: pollMessage.options?.length || 0,
+      secretKeyLength: pollMessage.secretKey?.length || 0,
+      voterCount: Object.keys(pollMessage.votes || {}).length,
+    });
   }
 
   // ============================================
