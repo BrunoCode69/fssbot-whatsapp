@@ -6,6 +6,7 @@ import User from "../modules/user/User";
 import TelegramToRompotConverter from "./TelegramToRompotConverter";
 import { TelegramUtils } from "./TelegramUtils";
 import TelegramBot from "./TelegramBot";
+import ButtonMessage from "../messages/ButtonMessage";
 
 export default class TelegramEvents {
   public telegram: TelegramBot;
@@ -16,8 +17,39 @@ export default class TelegramEvents {
 
   public configAll() {
     this.configMessage();
+    this.configCallbackQueries();
     this.configNewChatMembers();
     this.configLeftChatMember();
+  }
+
+  public configCallbackQueries() {
+    this.telegram.bot.on('callback_query', async (query) => {
+      const callbackData = query.data || '';
+      const sourceMessage = query.message;
+      if (!sourceMessage) {
+        await this.telegram.bot.answerCallbackQuery(query.id, { text: 'Esta ação não está disponível nesta mensagem.' });
+        return;
+      }
+
+      await this.telegram.bot.answerCallbackQuery(query.id);
+      const selectedMessage = ButtonMessage.fromJSON({
+        chat: { id: String(sourceMessage.chat.id), type: TelegramUtils.getChatType(sourceMessage.chat) },
+        user: {
+          id: TelegramUtils.getId(query.from),
+          name: TelegramUtils.getName(query.from),
+          nickname: TelegramUtils.getNickname(query.from),
+          phoneNumber: TelegramUtils.getPhoneNumber(query.from.id),
+        },
+        id: String(sourceMessage.message_id),
+        text: callbackData,
+        selected: callbackData,
+        fromMe: false,
+      });
+
+      await this.update(selectedMessage.user);
+      await this.update(selectedMessage.chat);
+      this.telegram.emit('message', selectedMessage);
+    });
   }
 
   public configMessage() {

@@ -11,6 +11,7 @@ import VideoMessage from '../messages/VideoMessage';
 import TextMessage from '../messages/TextMessage';
 import FileMessage from '../messages/FileMessage';
 import PollMessage from '../messages/PollMessage';
+import ButtonMessage from '../messages/ButtonMessage';
 import Message from '../messages/Message';
 
 import TelegramToRompotConverter from './TelegramToRompotConverter';
@@ -25,6 +26,10 @@ export default class TelegramSendingController {
   }
 
   public async send(message: Message): Promise<Message> {
+    if (ButtonMessage.isValid(message)) {
+      return await this.sendButtonMessage(message);
+    }
+
     if (TextMessage.isValid(message)) {
       return await this.sendText(message);
     }
@@ -93,6 +98,34 @@ export default class TelegramSendingController {
       options,
     );
 
+    return await new TelegramToRompotConverter(telegramMessage).convert();
+  }
+
+  public async sendButtonMessage(message: ButtonMessage): Promise<Message> {
+    const inlineKeyboard = message.buttons.map((button) => {
+      if (button.type === 'reply') {
+        return [{ text: button.text, callback_data: button.content }];
+      }
+      if (button.type === 'url') {
+        return [{ text: button.text, url: button.content }];
+      }
+      throw new Error(`O botão do tipo "${button.type}" não é suportado pelo Telegram. Use botões de resposta ou URL.`);
+    });
+    if (inlineKeyboard.length === 0) {
+      throw new Error('Adicione ao menos um botão antes de enviar a mensagem.');
+    }
+
+    const options = TelegramSendingController.getOptions(message) as TelegramBotAPI.SendMessageOptions;
+    options.reply_markup = { inline_keyboard: inlineKeyboard };
+    if (message.footer) {
+      message.text = `${message.text || ''}\n\n${message.footer}`;
+    }
+
+    const telegramMessage = await this.telegram.bot.sendMessage(
+      Number(message.chat.id),
+      `${message.text || ''}`,
+      options,
+    );
     return await new TelegramToRompotConverter(telegramMessage).convert();
   }
 
