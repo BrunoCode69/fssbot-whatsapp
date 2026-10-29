@@ -104,6 +104,7 @@ export default class ConvertWAMessage {
      * @returns
      */
     convertInteractiveMessage(content: WAMessageContent): void;
+    convertInteractiveResponseMessage(content: any): void;
     static convertMessageStatus(status?: proto.WebMessageInfo.Status): MessageStatus;
     static isMessageUpdate(waMessage: any): waMessage is WAMessageUpdate;
 }

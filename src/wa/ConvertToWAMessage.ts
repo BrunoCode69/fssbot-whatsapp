@@ -352,7 +352,7 @@ export default class ConvertToWAMessage {
       poll: {
         name: message.text,
         values: message.options.map((opt) => opt.name),
-        selectableCount: 1,
+        selectableCount: Number(message.extra?.selectableCount || 1),
       },
     };
   }

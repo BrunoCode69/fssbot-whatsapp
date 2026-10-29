@@ -59,7 +59,7 @@ export default class ConvertToWAMessage {
     refactoryButtonMessage(message: ButtonMessage): void;
     /**
      * * Refatora uma mensagem de lista
-     * Converte para formato compatível com baileys_helper
+      * Converte para o formato interativo single-select do helper WhatsApp
      * @param message
      */
     refactoryListMessage(message: ListMessage): Promise<void>;

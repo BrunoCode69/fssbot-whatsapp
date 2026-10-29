@@ -453,8 +453,10 @@ export default class ConvertWAMessage {
    * @param content
    */
   public async convertPollUpdateMessage(content: proto.Message.PollUpdateMessage) {
-    const pollCreation = await this.bot.getPollMessage(this.waMessage.key.id || "");
+    const pollMessageId = content?.pollCreationMessageKey?.id || this.waMessage.key.id || "";
+    const pollCreation = await this.bot.getPollMessage(pollMessageId);
     const pollUpdate = PollUpdateMessage.fromJSON({ ...this.message, type: MessageType.PollUpdate, text: pollCreation.text });
+    pollUpdate.extra.pollCreationMessageId = pollMessageId;
 
     const userId = fixID(this.waMessage.key.fromMe ? this.bot.id : this.waMessage.key.participant || this.waMessage.participant || this.waMessage.key.remoteJid || "");
 
