@@ -3,6 +3,7 @@ import { extractAndMapLID, fixID } from '../src/wa/ID';
 import { LIDMapper } from '../src/wa/LIDMapper';
 import { TelegramUtils } from '../src/telegram/TelegramUtils';
 import { createReactionKey } from '../src/wa/reaction-key';
+import { createReactionMessageData } from '../src/wa/reaction-message-data';
 
 describe('WhatsApp LID handling', () => {
   test('keeps a group destination when the sender uses a LID', () => {
@@ -87,6 +88,21 @@ describe('WhatsApp group reaction keys', () => {
       id: 'message-id',
       fromMe: false,
       participant: '5511888888888@s.whatsapp.net',
+    });
+  });
+});
+
+describe('WhatsApp incoming reaction conversion', () => {
+  test('keeps reaction type and target message ID', () => {
+    const data = createReactionMessageData(
+      { type: 'text', chat: { id: '120@g.us' }, user: { id: '5511888888888@s.whatsapp.net' } },
+      { text: '👍', key: { id: 'target-message-id' } },
+    );
+
+    expect(data).toMatchObject({
+      type: 'reaction',
+      text: '👍',
+      id: 'target-message-id',
     });
   });
 });

@@ -26,6 +26,7 @@ import WhatsAppBot from "./WhatsAppBot";
 import User from "../modules/user/User";
 import Chat from "../modules/chat/Chat";
 import { fixID, getLIDFromMessage, getPhoneNumber } from "./ID";
+import { createReactionMessageData } from './reaction-message-data';
 
 export default class ConvertWAMessage {
   public type?: MessageUpsertType;
@@ -404,7 +405,7 @@ export default class ConvertWAMessage {
    * @param content
    */
   public convertReactionMessage(content: any) {
-    this.message = ReactionMessage.fromJSON({ ...this.message, text: content.text, id: content.key.id });
+    this.message = ReactionMessage.fromJSON(createReactionMessageData(this.message, content));
   }
 
   /**
