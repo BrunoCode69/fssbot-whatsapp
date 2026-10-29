@@ -9,7 +9,7 @@ import {
 } from 'baileys';
 
 import Message, { MessageStatus, MessageType } from '../messages/Message';
-import ListMessage, { List, ListItem } from '../messages/ListMessage';
+import ListMessage from '../messages/ListMessage';
 import LocationMessage from '../messages/LocationMessage';
 import ReactionMessage from '../messages/ReactionMessage';
 import ContactMessage from '../messages/ContactMessage';
@@ -25,6 +25,7 @@ import { getWaSticker } from '../utils/Libs';
 
 import { fixID, getID, getPhoneNumber } from './ID';
 import { createReactionKey } from './reaction-key';
+import { createLegacyListPayload } from './legacy-list-payload';
 import type WhatsAppBot from './WhatsAppBot';
 
 export default class ConvertToWAMessage {
@@ -394,7 +395,7 @@ export default class ConvertToWAMessage {
 
   /**
    * * Refatora uma mensagem de lista
-   * Converte para formato compatível com baileys_helper
+  * Converte para o formato legado de lista do protocolo WhatsApp
    * @param message
    */
   public async refactoryListMessage(message: ListMessage) {
@@ -408,34 +409,8 @@ export default class ConvertToWAMessage {
       throw new Error('Lista deve ter pelo menos um item');
     }
 
-    // Converte para formato baileys_helper
-    const listButton = {
-      name: 'single_select',
-      buttonParamsJson: JSON.stringify({
-        title: message.button || 'Ver Opções',
-        sections: message.list.map((list: List) => ({
-          title: list.title,
-          highlight_label: list.label || undefined,
-          rows: list.items.map((item: ListItem) => ({
-            header: item.header || undefined,
-            title: item.title,
-            description: item.description || undefined,
-            id: item.id,
-          })),
-        })),
-      }),
-    };
-
-    // Marca para usar baileys_helper
-    this.waMessage = {
-      __useBaileysHelper: true,
-      text: message.text || '',
-      title: message.title || undefined,
-      footer: message.footer || undefined,
-      interactiveButtons: [listButton],
-    };
-
-    this.isRelay = false;
+    this.waMessage = createLegacyListPayload(message);
+    this.isRelay = true;
   }
 
   public static convertToWaMessageStatus(

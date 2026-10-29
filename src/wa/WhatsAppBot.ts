@@ -1203,19 +1203,20 @@ export default class WhatsAppBot extends BotEvents implements IBot {
 
     // Lógica normal de envio
     if (waMSG.isRelay) {
-      try {
-        await this.sock.relayMessage(normalizedChatId, waMSG.waMessage, {
-          ...waMSG.options,
-        });
-      } catch (err) {
-        throw err;
-      }
-
       const msgRes = generateWAMessageFromContent(
         normalizedChatId,
         waMSG.waMessage,
         { ...waMSG.options, userJid: this.id },
       );
+
+      try {
+        await this.sock.relayMessage(normalizedChatId, msgRes.message!, {
+          ...waMSG.options,
+          messageId: msgRes.key.id,
+        });
+      } catch (err) {
+        throw err;
+      }
 
       return await new ConvertWAMessage(this, msgRes).get();
     }

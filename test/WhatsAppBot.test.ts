@@ -4,6 +4,8 @@ import { LIDMapper } from '../src/wa/LIDMapper';
 import { TelegramUtils } from '../src/telegram/TelegramUtils';
 import { createReactionKey } from '../src/wa/reaction-key';
 import { createReactionMessageData } from '../src/wa/reaction-message-data';
+import { createLegacyListPayload } from '../src/wa/legacy-list-payload';
+import ListMessage from '../src/messages/ListMessage';
 
 describe('WhatsApp LID handling', () => {
   test('keeps a group destination when the sender uses a LID', () => {
@@ -104,6 +106,29 @@ describe('WhatsApp incoming reaction conversion', () => {
       text: '👍',
       id: 'target-message-id',
     });
+  });
+});
+
+describe('WhatsApp Web-compatible list payload', () => {
+  test('uses the legacy listMessage protocol and preserves selectable row IDs', () => {
+    const list = new ListMessage('120@g.us', 'Pick an option');
+    list.setTitle('Menu').setButton('Open').setFooter('Footer');
+    list.addCategory('Category 1');
+    list.addItem(0, 'Option 1', 'Description', 'option_1');
+
+    const payload = createLegacyListPayload(list);
+
+    expect(payload.listMessage).toMatchObject({
+      title: 'Menu',
+      description: 'Pick an option',
+      buttonText: 'Open',
+      footerText: 'Footer',
+      sections: [{
+        title: 'Category 1',
+        rows: [{ title: 'Option 1', description: 'Description', rowId: 'option_1' }],
+      }],
+    });
+    expect('interactiveMessage' in payload).toBe(false);
   });
 });
 
