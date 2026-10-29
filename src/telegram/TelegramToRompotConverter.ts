@@ -58,6 +58,8 @@ export default class TelegramToRompotConverter {
     this.rompotMessage.user.phoneNumber = TelegramUtils.getPhoneNumber(
       this.telegramMessage.from!.id,
     );
+    this.rompotMessage.extra.telegramAnonymousAdmin =
+      TelegramUtils.isAnonymousGroupAdminMessage(this.telegramMessage);
 
     this.rompotMessage.id = `${this.telegramMessage.message_id}`;
     this.rompotMessage.text = `${this.telegramMessage.text || this.telegramMessage.caption || ''}`;

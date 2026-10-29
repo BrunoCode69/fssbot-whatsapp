@@ -51,6 +51,12 @@ export namespace TelegramUtils {
     return `${id}`.replace(/\D+/g, "") || "0";
   }
 
+  export function isAnonymousGroupAdminMessage(msg: TelegramBotAPI.Message): boolean {
+    return msg?.from?.is_bot === true
+      && msg.from.username === 'GroupAnonymousBot'
+      && String(msg.sender_chat?.id ?? '') === String(msg.chat?.id ?? '');
+  }
+
   export function getText(msg: TelegramBotAPI.Message): string {
     if (!msg || typeof msg != "object") {
       return "";

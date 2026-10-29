@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { extractAndMapLID, fixID } from '../src/wa/ID';
 import { LIDMapper } from '../src/wa/LIDMapper';
+import { TelegramUtils } from '../src/telegram/TelegramUtils';
 
 describe('WhatsApp LID handling', () => {
   test('keeps a group destination when the sender uses a LID', () => {
@@ -30,5 +31,27 @@ describe('WhatsApp LID handling', () => {
 
     expect(result).toEqual({ id: 'user:4@lid', lid: 'user:4@lid' });
     expect(fixID('user:4@lid')).toBe('user:4@lid');
+  });
+});
+
+describe('Telegram anonymous admin attribution', () => {
+  test('recognizes GroupAnonymousBot messages sent on behalf of the current group', () => {
+    const message = {
+      chat: { id: -1001234567890, type: 'supergroup' },
+      from: { id: 1087968824, is_bot: true, username: 'GroupAnonymousBot', first_name: 'Group' },
+      sender_chat: { id: -1001234567890, type: 'supergroup' },
+    } as any;
+
+    expect(TelegramUtils.isAnonymousGroupAdminMessage(message)).toBe(true);
+  });
+
+  test('does not recognize messages attributed to a different chat', () => {
+    const message = {
+      chat: { id: -1001234567890, type: 'supergroup' },
+      from: { id: 1087968824, is_bot: true, username: 'GroupAnonymousBot', first_name: 'Group' },
+      sender_chat: { id: -1009876543210, type: 'supergroup' },
+    } as any;
+
+    expect(TelegramUtils.isAnonymousGroupAdminMessage(message)).toBe(false);
   });
 });
