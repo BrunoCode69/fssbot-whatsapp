@@ -25,7 +25,7 @@ import ChatType from "../modules/chat/ChatType";
 import WhatsAppBot from "./WhatsAppBot";
 import User from "../modules/user/User";
 import Chat from "../modules/chat/Chat";
-import { fixID, getLIDFromMessage } from "./ID";
+import { fixID, getLIDFromMessage, getPhoneNumber } from "./ID";
 
 export default class ConvertWAMessage {
   public type?: MessageUpsertType;
@@ -132,15 +132,23 @@ export default class ConvertWAMessage {
     } else {
       // Em grupos, participant pode ter LID
       const participantId = waMessage.key.participant || waMessage.participant;
+      const participantAlt = waMessage.key.participantAlt;
+      const remoteJidAlt = waMessage.key.remoteJidAlt;
       if (participantId) {
-        userLid = getLIDFromMessage({ participant: participantId });
+        userLid = getLIDFromMessage({ participant: participantId }) || getLIDFromMessage({ participant: participantAlt });
         userId = participantId;
       } else {
         userId = waMessage.key.remoteJid || '';
+        userLid = getLIDFromMessage({ participant: remoteJidAlt }) || undefined;
       }
     }
 
-    this.message.user = new User(fixID(userId, userLid || chatLid));
+    const user = new User(fixID(userId, userLid || chatLid));
+    const mappedUserJid = this.bot.lidMapper.getJID(userLid || (userId.includes('@lid') ? userId : ''));
+    if (mappedUserJid) {
+      user.phoneNumber = getPhoneNumber(mappedUserJid);
+    }
+    this.message.user = user;
   }
 
   /**

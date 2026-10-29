@@ -1,3 +1,5 @@
+import type { LIDMapper } from './LIDMapper';
+
 /**
  * Extrai o LID (Local ID) de um identificador, se disponível
  * LIDs têm formato: número:sequência@lid
@@ -35,6 +37,26 @@ export function getLIDFromMessage(key: { remoteJid?: string; participant?: strin
   }
 
   return null;
+}
+
+export function extractAndMapLID(message: any, lidMapper: LIDMapper): { id: string; lid?: string } {
+  const key = message?.key || {};
+  const remoteJid = key.remoteJid || '';
+  const remoteJidAlt = key.remoteJidAlt || message?.remoteJidAlt || '';
+  const participant = key.participant || message?.participant || '';
+  const participantAlt = key.participantAlt || message?.participantAlt || '';
+
+  const registerAlternateIds = (first: string, second: string) => {
+    const lid = first.includes('@lid') ? first : second.includes('@lid') ? second : '';
+    const jid = lid === first ? second : first;
+    if (lid && jid && !jid.includes('@lid')) lidMapper.register(lid, jid);
+  };
+
+  registerAlternateIds(remoteJid, remoteJidAlt);
+  registerAlternateIds(participant, participantAlt);
+
+  const lid = remoteJid.includes('@lid') ? remoteJid : undefined;
+  return { id: remoteJid, lid };
 }
 
 /**

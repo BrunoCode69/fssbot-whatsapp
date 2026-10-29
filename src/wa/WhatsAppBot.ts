@@ -38,7 +38,7 @@ import ConvertWAMessage from './ConvertWAMessage';
 import { Media } from '../messages/MediaMessage';
 import { UserAction, UserEvent } from '../modules/user';
 import ConfigWAEvents from './ConfigWAEvents';
-import { fixID, getPhoneNumber, getLIDFromMessage } from './ID';
+import { extractAndMapLID, fixID, getPhoneNumber, getLIDFromMessage } from './ID';
 import { LIDMapper } from './LIDMapper';
 import { BotStatus } from '../bot/BotStatus';
 import ChatType from '../modules/chat/ChatType';
@@ -228,24 +228,7 @@ export default class WhatsAppBot extends BotEvents implements IBot {
    * @returns Objeto com id (preferencial) e lid (se disponível)
    */
   public extractAndMapLID(message: any): { id: string; lid?: string } {
-    const key = message.key || {};
-
-    // Extrai LID de participant (grupos) ou remoteJid
-    const lid = getLIDFromMessage(key);
-
-    // Extrai JID tradicional
-    let jid = key.remoteJid || '';
-
-    // Se temos ambos, registra o mapeamento
-    if (lid && jid && !jid.includes('@lid')) {
-      this.lidMapper.register(lid, jid);
-    }
-
-    // Retorna o identificador preferencial (LID se disponível)
-    return {
-      id: lid || jid,
-      lid: lid || undefined
-    };
+    return extractAndMapLID(message, this.lidMapper);
   }
 
   // ============================================
