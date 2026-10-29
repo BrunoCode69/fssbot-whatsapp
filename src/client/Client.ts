@@ -101,6 +101,13 @@ export default class Client<Bot extends IBot = IBot>
 
         this.emit('message', message);
       } catch (err) {
+        console.error('[Rompot client] message handling failed', {
+          type: message.type,
+          messageId: message.id,
+          chatId: message.chat?.id,
+          error: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+        });
         this.emit('message', new ErrorMessage(message.chat, err));
       }
     });
