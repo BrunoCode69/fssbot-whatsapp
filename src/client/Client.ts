@@ -375,16 +375,21 @@ export default class Client<Bot extends IBot = IBot>
       );
     }
 
-    if ('file' in message) {
-      return Message.apply(
-        await this.funcHandler.exec('sendMediaMessage', this.bot.send, message),
-        { clientId: this.id, botId: this.bot.id },
-      );
-    } else {
+    try {
+      if ('file' in message) {
+        return Message.apply(
+          await this.funcHandler.exec('sendMediaMessage', this.bot.send, message),
+          { clientId: this.id, botId: this.bot.id },
+        );
+      }
       return Message.apply(
         await this.funcHandler.exec('sendMessage', this.bot.send, message),
         { clientId: this.id, botId: this.bot.id },
       );
+    } finally {
+      if (!this.config.disableAutoTyping) {
+        await this.changeChatStatus(message.chat, ChatStatus.Paused);
+      }
     }
   }
 

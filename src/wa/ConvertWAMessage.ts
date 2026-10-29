@@ -26,6 +26,7 @@ import WhatsAppBot from "./WhatsAppBot";
 import User from "../modules/user/User";
 import Chat from "../modules/chat/Chat";
 import { fixID, getLIDFromMessage, getPhoneNumber } from "./ID";
+import { extractInteractiveListSelection } from './list-selection';
 import { createReactionMessageData } from './reaction-message-data';
 
 export default class ConvertWAMessage {
@@ -209,6 +210,14 @@ export default class ConvertWAMessage {
 
     if (contentType === "interactiveMessage") {
       this.convertInteractiveMessage(messageContent!);
+    }
+
+    if (contentType === "interactiveResponseMessage") {
+      this.convertInteractiveResponseMessage(messageContent![contentType]);
+    }
+
+    if (contentType === "interactiveResponseMessage") {
+      this.convertInteractiveResponseMessage(messageContent![contentType]);
     }
 
     if (contentType === "locationMessage") {
@@ -596,6 +605,14 @@ export default class ConvertWAMessage {
     if (!interactiveMessage) return;
 
     // TODO: Implementar a conversão de mensagem interativa
+  }
+
+  public convertInteractiveResponseMessage(content: any) {
+    const response = content?.nativeFlowResponseMessage;
+    this.message.selected = extractInteractiveListSelection(content);
+    this.message.text = content?.body?.text || '';
+    const listMessageId = response?.contextInfo?.stanzaId || content?.contextInfo?.stanzaId;
+    if (listMessageId) this.message.extra.listMessageId = listMessageId;
   }
 
   public static convertMessageStatus(status?: proto.WebMessageInfo.Status): MessageStatus {

@@ -25,7 +25,7 @@ import { getWaSticker } from '../utils/Libs';
 
 import { fixID, getID, getPhoneNumber } from './ID';
 import { createReactionKey } from './reaction-key';
-import { createLegacyListPayload } from './legacy-list-payload';
+import { createInteractiveListPayload } from './interactive-list-payload';
 import type WhatsAppBot from './WhatsAppBot';
 
 export default class ConvertToWAMessage {
@@ -395,7 +395,7 @@ export default class ConvertToWAMessage {
 
   /**
    * * Refatora uma mensagem de lista
-  * Converte para o formato legado de lista do protocolo WhatsApp
+    * Converte para o formato interativo single-select do helper WhatsApp
    * @param message
    */
   public async refactoryListMessage(message: ListMessage) {
@@ -409,8 +409,8 @@ export default class ConvertToWAMessage {
       throw new Error('Lista deve ter pelo menos um item');
     }
 
-    this.waMessage = createLegacyListPayload(message);
-    this.isRelay = true;
+    this.waMessage = createInteractiveListPayload(message);
+    this.isRelay = false;
   }
 
   public static convertToWaMessageStatus(

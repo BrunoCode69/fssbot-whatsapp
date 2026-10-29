@@ -4,7 +4,8 @@ import { LIDMapper } from '../src/wa/LIDMapper';
 import { TelegramUtils } from '../src/telegram/TelegramUtils';
 import { createReactionKey } from '../src/wa/reaction-key';
 import { createReactionMessageData } from '../src/wa/reaction-message-data';
-import { createLegacyListPayload } from '../src/wa/legacy-list-payload';
+import { createInteractiveListPayload } from '../src/wa/interactive-list-payload';
+import { extractInteractiveListSelection } from '../src/wa/list-selection';
 import ListMessage from '../src/messages/ListMessage';
 
 describe('WhatsApp LID handling', () => {
@@ -109,26 +110,36 @@ describe('WhatsApp incoming reaction conversion', () => {
   });
 });
 
-describe('WhatsApp Web-compatible list payload', () => {
-  test('uses the legacy listMessage protocol and preserves selectable row IDs', () => {
+describe('WhatsApp helper-based list payload', () => {
+  test('uses the baileys_helper single_select format and preserves selectable row IDs', () => {
     const list = new ListMessage('120@g.us', 'Pick an option');
     list.setTitle('Menu').setButton('Open').setFooter('Footer');
     list.addCategory('Category 1');
     list.addItem(0, 'Option 1', 'Description', 'option_1');
 
-    const payload = createLegacyListPayload(list);
+    const payload = createInteractiveListPayload(list);
 
-    expect(payload.listMessage).toMatchObject({
-      title: 'Menu',
-      description: 'Pick an option',
-      buttonText: 'Open',
-      footerText: 'Footer',
+    expect(payload.__useBaileysHelper).toBe(true);
+    expect(payload.interactiveButtons[0]?.name).toBe('single_select');
+    expect(JSON.parse(payload.interactiveButtons[0]?.buttonParamsJson || '{}')).toMatchObject({
+      title: 'Open',
       sections: [{
         title: 'Category 1',
-        rows: [{ title: 'Option 1', description: 'Description', rowId: 'option_1' }],
+        rows: [{ title: 'Option 1', description: 'Description', id: 'option_1' }],
       }],
     });
-    expect('interactiveMessage' in payload).toBe(false);
+    expect(payload.text).toBe('Pick an option');
+    expect(payload.title).toBe('Menu');
+    expect(payload.footer).toBe('Footer');
+  });
+
+  test('extracts the selected row ID from a native-flow response', () => {
+    expect(extractInteractiveListSelection({
+      nativeFlowResponseMessage: {
+        name: 'single_select',
+        paramsJson: JSON.stringify({ id: 'option_1' }),
+      },
+    })).toBe('option_1');
   });
 });
 
