@@ -1,3 +1,4 @@
+import type { LIDMapper } from './LIDMapper';
 /**
  * Extrai o LID (Local ID) de um identificador, se disponível
  * LIDs têm formato: número:sequência@lid
@@ -15,6 +16,10 @@ export declare function getLIDFromMessage(key: {
     remoteJid?: string;
     participant?: string;
 }): string | null;
+export declare function extractAndMapLID(message: any, lidMapper: LIDMapper): {
+    id: string;
+    lid?: string;
+};
 /**
  * Normaliza um identificador, priorizando LID sobre JID
  * Remove formato antigo :número@ e retorna identificador limpo
