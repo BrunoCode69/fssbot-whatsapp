@@ -1192,14 +1192,13 @@ export default class WhatsAppBot extends BotEvents implements IBot {
 
       // Importa dinamicamente o baileys_helper
 
-      await sendInteractiveMessage(
+      const sentInteractiveMessage = await sendInteractiveMessage(
         this.sock,
         normalizedChatId,
         waMSG.waMessage
       );
 
-      // Retorna a mensagem original
-      return content;
+      return await new ConvertWAMessage(this, sentInteractiveMessage).get();
     }
 
     // Lógica normal de envio
