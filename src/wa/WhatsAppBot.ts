@@ -4,6 +4,7 @@ import makeWASocket, {
   DEFAULT_CONNECTION_CONFIG,
   MediaDownloadOptions,
   downloadMediaMessage,
+  fetchLatestWaWebVersion,
   AuthenticationCreds,
   DEFAULT_CACHE_TTLS,
   WAConnectionState,
@@ -11,12 +12,12 @@ import makeWASocket, {
   ConnectionState,
   GroupMetadata,
   SocketConfig,
-  isJidGroup,
+  WAMessage,
+  WAVersion,
   Browsers,
   Contact,
   proto,
   Chat as BaileysChat,
-  jidNormalizedUser, // NOVO - Import para normalizar JIDs
 } from 'baileys';
 import { sendInteractiveMessage } from 'baileys_helper';
 
@@ -38,8 +39,16 @@ import ConvertWAMessage from './ConvertWAMessage';
 import { Media } from '../messages/MediaMessage';
 import { UserAction, UserEvent } from '../modules/user';
 import ConfigWAEvents from './ConfigWAEvents';
-import { extractAndMapLID, fixID, getPhoneNumber, getLIDFromMessage } from './ID';
-import { LIDMapper } from './LIDMapper';
+import {
+  extractAndMapLID,
+  getPhoneNumber,
+  isGroupJid,
+  isLidJid,
+  isPnJid,
+  isUserJid,
+  normalizeJid,
+} from './ID';
+import { LIDMapper, LIDPNPair } from './LIDMapper';
 import { BotStatus } from '../bot/BotStatus';
 import ChatType from '../modules/chat/ChatType';
 import BotEvents from '../bot/BotEvents';
@@ -64,9 +73,45 @@ export type WhatsAppBotConfig = Partial<SocketConfig> & {
   autoLoadContactInfo: boolean;
   /** Auto carrega informações de contatos */
   autoLoadGroupInfo: boolean;
+  /** Busca a versão mais recente do WhatsApp Web antes de conectar (recomendado) */
+  autoFetchLatestVersion: boolean;
+  /** Tempo, em segundos, que os metadados de grupo ficam em cache */
+  groupMetadataCacheTTL: number;
+  /** Tempo, em segundos, que mensagens ficam em cache para reenvio, citação e encaminhamento */
+  messageCacheTTL: number;
 };
 
+/** Identidade de um usuário no WhatsApp. */
+export type WAIdentity = {
+  /** ID canônico (PN quando conhecido, senão LID) */
+  id: string;
+  /** JID baseado no número (`@s.whatsapp.net`), quando conhecido */
+  pn?: string;
+  /** LID (`@lid`), quando conhecido */
+  lid?: string;
+  /** Número em dígitos, ou vazio quando oculto */
+  phoneNumber: string;
+};
+
+/** Pedido de entrada pendente num grupo. */
+export type WAJoinRequest = {
+  user: User;
+  /** Momento do pedido em milissegundos */
+  requestedAt?: number;
+  /** Origem do pedido */
+  method?: string;
+};
+
+/** Tempo de fixação aceito pelo WhatsApp: 24 horas, 7 dias ou 30 dias. */
+export type WAPinDuration = 86400 | 604800 | 2592000;
+
+/** Tempo de escrita atrasada dos registros de chat/usuário (agrupa várias alterações numa só gravação). */
+const RECORD_FLUSH_DELAY_MS = 1500;
+
 export default class WhatsAppBot extends BotEvents implements IBot {
+  /** Versão do WhatsApp Web obtida em tempo de execução (compartilhada entre instâncias). */
+  private static latestVersion?: { version: WAVersion; fetchedAt: number };
+
   //@ts-ignore
   public sock: ReturnType<typeof makeWASocket> = {};
   public config: WhatsAppBotConfig;
@@ -78,6 +123,10 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     stdTTL: DEFAULT_CACHE_TTLS.MSG_RETRY, // 1 hour
     useClones: false,
   });
+  /** Mensagens recentes por ID (reenvio, votos de enquete, citação e encaminhamento) */
+  public messageCache: NodeCache;
+  /** Metadados de grupo (usado pelo Baileys em `cachedGroupMetadata`) */
+  public groupMetadataCache: NodeCache;
 
   public saveCreds = (creds: Partial<AuthenticationCreds>) =>
     new Promise<void>((res) => res);
@@ -89,6 +138,8 @@ export default class WhatsAppBot extends BotEvents implements IBot {
   public logger: any = pino({ level: 'silent' });
 
   public id: string = '';
+  /** LID do próprio bot */
+  public lid: string = '';
   public status: BotStatus = BotStatus.Offline;
   public phoneNumber: string = '';
   public name: string = '';
@@ -99,12 +150,20 @@ export default class WhatsAppBot extends BotEvents implements IBot {
   public configEvents: ConfigWAEvents = new ConfigWAEvents(this);
   public lidMapper: LIDMapper = new LIDMapper();
 
+  /** Cache dos registros `chats-*` e `users-*` (null = não existe no disco) */
+  private recordCache = new NodeCache({ stdTTL: 30 * 60, useClones: false, checkperiod: 120 });
+  private pendingRecordWrites = new Map<string, NodeJS.Timeout>();
+  /** Chaves de registros antigos salvos com LID, carregadas sob demanda para migração */
+  private legacyLidRecords?: Set<string>;
+  private userConfig: Partial<WhatsAppBotConfig>;
+
   constructor(config?: Partial<WhatsAppBotConfig>) {
     super();
 
     const store = makeInMemoryStore({ logger: this.logger });
 
     this.store = store;
+    this.userConfig = config || {};
 
     const waBot = this;
 
@@ -123,6 +182,11 @@ export default class WhatsAppBot extends BotEvents implements IBot {
       autoSyncHistory: false,
       autoLoadContactInfo: false,
       autoLoadGroupInfo: false,
+      autoFetchLatestVersion: true,
+      groupMetadataCacheTTL: 5 * 60,
+      messageCacheTTL: 30 * 60,
+      // Um bot não precisa do histórico completo; os pares LID ↔ PN do sync inicial continuam chegando.
+      syncFullHistory: !!config?.autoSyncHistory,
       shouldIgnoreJid: () => false,
       async patchMessageBeforeSending(msg) {
         if (
@@ -148,87 +212,319 @@ export default class WhatsAppBot extends BotEvents implements IBot {
         return msg;
       },
       async getMessage(key) {
+        const cached = key.id ? waBot.messageCache.get<WAMessage>(key.id) : undefined;
+        if (cached?.message) return cached.message;
+
+        const remoteJid = key.remoteJid || '';
+
         return (
-          (await waBot.store.loadMessage(fixID(key.remoteJid!), key.id!))
-            ?.message || undefined
+          (await waBot.store.loadMessage(normalizeJid(remoteJid), key.id!))?.message ||
+          (await waBot.store.loadMessage(remoteJid, key.id!))?.message ||
+          undefined
         );
+      },
+      async cachedGroupMetadata(jid) {
+        return waBot.groupMetadataCache.get<GroupMetadata>(jid);
       },
       ...config,
     };
+
+    this.messageCache = new NodeCache({
+      stdTTL: this.config.messageCacheTTL,
+      useClones: false,
+      checkperiod: 120,
+    });
+    this.groupMetadataCache = new NodeCache({
+      stdTTL: this.config.groupMetadataCacheTTL,
+      useClones: false,
+      checkperiod: 60,
+    });
+
+    this.lidMapper.onMapping((pair) => this.onIdentityMapping(pair));
 
     delete this.config.auth;
   }
 
   // ============================================
-  // MÉTODOS AUXILIARES PARA NORMALIZAR JIDs
+  // IDENTIDADE (PN ↔ LID)
   // ============================================
 
   /**
-   * Normaliza um JID/LID para o formato correto do Baileys 7.x
-   * PRIORIZA LID sobre JID quando disponível
-   * @param jid - JID ou LID a ser normalizado
-   * @param lid - LID alternativo (de remoteJidAlt, por exemplo)
-   * @returns Identificador normalizado (preferencialmente LID)
+   * ID canônico de um usuário ou chat, só com dados em memória.
+   * Pessoas: PN quando conhecido, senão LID. Grupos/canais: apenas normalizados.
    */
-  private safeNormalizeJid(jid: string | undefined, lid?: string): string | undefined {
-    if (!jid || typeof jid !== 'string') return undefined;
+  public canonicalId(id?: string | null): string {
+    const normalized = normalizeJid(id || '');
+    if (!normalized) return '';
+    if (this.lid && normalized === this.lid && this.id) return this.id;
 
-    try {
-      // 1. Se temos LID explícito, usa ele
-      if (lid && lid.includes('@lid')) {
-        const resolved = this.lidMapper.resolve(lid);
-        // Registra o mapeamento se temos ambos
-        if (jid && !jid.includes('@lid')) {
-          this.lidMapper.register(lid, jid);
-        }
-        return resolved;
-      }
-
-      // 2. Se o JID já é um LID, usa ele
-      if (jid.includes('@lid')) {
-        return this.lidMapper.resolve(jid);
-      }
-
-      // 3. Tenta encontrar LID correspondente ao JID
-      const mappedLid = this.lidMapper.getLID(jid);
-      if (mappedLid) {
-        return mappedLid;
-      }
-
-      // 4. Fallback: normaliza como JID tradicional
-      if (jid.includes('@')) {
-        return jidNormalizedUser(jid);
-      }
-
-      // 5. Se é só número, adiciona @s.whatsapp.net
-      if (/^\d+$/.test(jid)) {
-        return jidNormalizedUser(`${jid}@s.whatsapp.net`);
-      }
-
-      return undefined;
-    } catch (error) {
-      this.logger?.error?.('Error normalizing JID/LID:', jid, lid, error);
-      return undefined;
-    }
+    return this.lidMapper.canonical(normalized);
   }
 
   /**
-   * Normaliza um array de JIDs/LIDs
+   * ID canônico de um usuário ou chat, consultando também o store persistente do Baileys.
+   * Aceita número puro, PN, LID, grupo, com ou sem sufixo de dispositivo.
    */
-  private safeNormalizeJids(jids: string[]): string[] {
-    return jids
-      .map((jid) => this.safeNormalizeJid(jid))
-      .filter((jid): jid is string => jid !== undefined);
+  public async resolveId(id?: string | null): Promise<string> {
+    const normalized = normalizeJid(id || '');
+    if (!normalized) return '';
+    if (this.lid && normalized === this.lid && this.id) return this.id;
+    if (!isLidJid(normalized)) return normalized;
+
+    return await this.lidMapper.canonicalAsync(normalized);
+  }
+
+  /** Retorna todos os identificadores conhecidos de um usuário. */
+  public async getIdentity(id?: string | null): Promise<WAIdentity> {
+    const canonical = await this.resolveId(id);
+    const pn = isPnJid(canonical) ? canonical : undefined;
+    const lid = isLidJid(canonical) ? canonical : pn ? this.lidMapper.getLID(pn) : undefined;
+
+    return { id: canonical, pn, lid, phoneNumber: pn ? getPhoneNumber(pn) : '' };
   }
 
   /**
-   * Extrai e mapeia LID de uma mensagem WAMessage
-   * Usa remoteJidAlt quando disponível (Baileys 6.8.0+)
-   * @param message - Mensagem WAMessage ou objeto com key
-   * @returns Objeto com id (preferencial) e lid (se disponível)
+   * Busca o LID de um número no WhatsApp (pode consultar a rede).
+   */
+  public async getUserLID(id: string): Promise<string> {
+    const canonical = await this.resolveId(id);
+    if (!canonical) return '';
+    if (isLidJid(canonical)) return canonical;
+
+    return (await this.lidMapper.resolveLID(canonical)) || '';
+  }
+
+  /**
+   * Registra os pares PN ↔ LID de uma chave de mensagem.
+   * Mantido por compatibilidade.
    */
   public extractAndMapLID(message: any): { id: string; lid?: string } {
     return extractAndMapLID(message, this.lidMapper);
+  }
+
+  /** Registra um par PN ↔ LID descoberto fora das mensagens (participantes, contatos, chamadas). */
+  public registerIdentity(first?: string | null, second?: string | null, persist: boolean = false): boolean {
+    return this.lidMapper.register(first, second, persist);
+  }
+
+  /** Chamado quando um par PN ↔ LID novo é aprendido. */
+  private onIdentityMapping(pair: LIDPNPair) {
+    this.emit('id-mapping', { ...pair, phoneNumber: getPhoneNumber(pair.pn) });
+
+    this.migrateLegacyRecords(pair).catch((err) => this.emit('error', err));
+  }
+
+  /**
+   * Move registros salvos com LID (`users-<lid>`, `chats-<lid>`) para o ID canônico (PN),
+   * para que a mesma pessoa não tenha dois registros.
+   */
+  private async migrateLegacyRecords({ lid, pn }: LIDPNPair) {
+    if (!this.legacyLidRecords) {
+      const keys = [
+        ...(await this.auth.listAll('users-')),
+        ...(await this.auth.listAll('chats-')),
+      ];
+
+      this.legacyLidRecords = new Set(keys.filter((key) => key.endsWith('@lid')));
+    }
+
+    for (const prefix of ['users', 'chats']) {
+      const legacyKey = `${prefix}-${lid}`;
+      if (!this.legacyLidRecords.has(legacyKey)) continue;
+
+      this.legacyLidRecords.delete(legacyKey);
+
+      const legacy = await this.getRecord(legacyKey);
+      if (!legacy) continue;
+
+      const currentKey = `${prefix}-${pn}`;
+      const current = (await this.getRecord(currentKey)) || {};
+
+      const merged = { ...legacy, ...current, id: pn, lid };
+      merged.phoneNumber = getPhoneNumber(pn);
+
+      if (prefix == 'chats') merged.type = ChatType.PV;
+
+      this.setRecord(currentKey, merged);
+      this.removeRecord(legacyKey);
+    }
+  }
+
+  // ============================================
+  // REGISTROS (chats-* / users-*)
+  // ============================================
+
+  private async getRecord(key: string): Promise<any> {
+    const cached = this.recordCache.get(key);
+    if (cached !== undefined) return cached;
+
+    const value = (await this.auth.get(key)) || null;
+    this.recordCache.set(key, value);
+
+    return value;
+  }
+
+  private setRecord(key: string, value: any) {
+    this.recordCache.set(key, value);
+    this.scheduleRecordWrite(key);
+  }
+
+  private removeRecord(key: string) {
+    this.recordCache.set(key, null);
+    this.scheduleRecordWrite(key);
+  }
+
+  private scheduleRecordWrite(key: string) {
+    if (this.pendingRecordWrites.has(key)) return;
+
+    const timeout = setTimeout(() => {
+      this.pendingRecordWrites.delete(key);
+      this.writeRecord(key).catch((err) => this.emit('error', err));
+    }, RECORD_FLUSH_DELAY_MS);
+
+    this.pendingRecordWrites.set(key, timeout);
+  }
+
+  private async writeRecord(key: string) {
+    const value = this.recordCache.get(key);
+
+    if (value) {
+      await this.auth.set(key, value);
+    } else {
+      await this.auth.remove(key);
+    }
+  }
+
+  /** Grava imediatamente todos os registros pendentes. */
+  public async flushRecords(): Promise<void> {
+    const keys = [...this.pendingRecordWrites.keys()];
+
+    for (const key of keys) {
+      clearTimeout(this.pendingRecordWrites.get(key)!);
+      this.pendingRecordWrites.delete(key);
+    }
+
+    await Promise.all(keys.map((key) => this.writeRecord(key).catch(() => undefined)));
+  }
+
+  // ============================================
+  // CACHE DE MENSAGENS E GRUPOS
+  // ============================================
+
+  /** Guarda uma mensagem recebida ou enviada (reenvio, votos de enquete, citação, encaminhamento). */
+  public cacheWAMessage(message?: WAMessage | null) {
+    if (!message?.key?.id || !message.message) return;
+
+    this.messageCache.set(message.key.id, message);
+  }
+
+  /** Retorna a mensagem original do WhatsApp pelo ID, se ainda estiver em cache. */
+  public getCachedWAMessage(id?: string): WAMessage | undefined {
+    if (!id) return undefined;
+
+    return this.messageCache.get<WAMessage>(id);
+  }
+
+  /** Registra os pares PN ↔ LID presentes nos participantes de um grupo. */
+  public registerParticipants(participants?: Array<Partial<Contact>> | null) {
+    for (const participant of participants || []) {
+      if (!participant?.id) continue;
+
+      this.lidMapper.register(participant.id, participant.phoneNumber, true);
+      this.lidMapper.register(participant.id, participant.lid, true);
+    }
+  }
+
+  /** Atualiza o cache de metadados de um grupo. */
+  public setGroupMetadata(metadata?: GroupMetadata | null) {
+    if (!metadata?.id) return;
+
+    this.registerParticipants(metadata.participants);
+
+    if (metadata.owner || metadata.ownerPn) this.lidMapper.register(metadata.owner, metadata.ownerPn, true);
+    if (metadata.subjectOwner || metadata.subjectOwnerPn) {
+      this.lidMapper.register(metadata.subjectOwner, metadata.subjectOwnerPn, true);
+    }
+
+    this.groupMetadataCache.set(metadata.id, metadata);
+  }
+
+  /**
+   * Aplica uma mudança de participantes no cache do grupo, sem nova consulta à rede.
+   * Mantém o cache correto para o próximo envio ao grupo.
+   */
+  public applyParticipantsUpdate(
+    groupId: string,
+    participants: Array<Partial<Contact> & { admin?: 'admin' | 'superadmin' | null }>,
+    action: 'add' | 'remove' | 'promote' | 'demote' | 'modify',
+  ) {
+    const id = normalizeJid(groupId);
+    const cached = this.groupMetadataCache.get<GroupMetadata>(id);
+    if (!cached) return;
+
+    if (action == 'modify') {
+      this.invalidateGroupMetadata(id);
+      return;
+    }
+
+    const isSame = (a: Partial<Contact>, b: Partial<Contact>) =>
+      [a.id, a.phoneNumber, a.lid].some(
+        (x) => !!x && [b.id, b.phoneNumber, b.lid].some((y) => !!y && this.lidMapper.isSameUser(x, y)),
+      );
+
+    let list = [...(cached.participants || [])];
+
+    for (const participant of participants || []) {
+      if (!participant?.id) continue;
+
+      if (action == 'add') {
+        if (!list.some((p) => isSame(p, participant))) {
+          list.push({ ...participant, id: participant.id, admin: participant.admin || null } as any);
+        }
+      } else if (action == 'remove') {
+        if (this.lidMapper.isSameUser(participant.phoneNumber || participant.id, this.id)) {
+          this.invalidateGroupMetadata(id);
+          return;
+        }
+
+        list = list.filter((p) => !isSame(p, participant));
+      } else {
+        list = list.map((p) =>
+          isSame(p, participant) ? ({ ...p, admin: action == 'promote' ? 'admin' : null } as any) : p,
+        );
+      }
+    }
+
+    this.groupMetadataCache.set(id, { ...cached, participants: list, size: list.length });
+  }
+
+  /** Remove um grupo do cache para que o próximo acesso busque dados atuais. */
+  public invalidateGroupMetadata(id: string) {
+    this.groupMetadataCache.del(normalizeJid(id) || id);
+  }
+
+  /**
+   * Metadados de um grupo, usando cache.
+   * @param chat - Grupo
+   * @param force - Ignora o cache e consulta o WhatsApp
+   */
+  public async getGroupMetadata(chat: Chat | string, force: boolean = false): Promise<GroupMetadata | null> {
+    const id = normalizeJid(typeof chat == 'string' ? chat : chat?.id);
+    if (!id || !isGroupJid(id)) return null;
+
+    if (!force) {
+      const cached = this.groupMetadataCache.get<GroupMetadata>(id);
+      if (cached) return cached;
+    }
+
+    try {
+      const metadata = await this.sock.groupMetadata(id);
+      this.setGroupMetadata(metadata);
+
+      return metadata;
+    } catch {
+      return null;
+    }
   }
 
   // ============================================
@@ -263,12 +559,41 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     await this.awaitConnectionState('open');
   }
 
+  /**
+   * Versão do WhatsApp Web usada na conexão.
+   * Busca a versão atual (com cache de 6 horas) e usa a versão embutida no Baileys se a busca falhar.
+   */
+  public async resolveVersion(): Promise<WAVersion | undefined> {
+    if (this.userConfig.version || !this.config.autoFetchLatestVersion) return undefined;
+
+    const cached = WhatsAppBot.latestVersion;
+    if (cached && Date.now() - cached.fetchedAt < 6 * 60 * 60 * 1000) return cached.version;
+
+    try {
+      const result = await Promise.race([
+        fetchLatestWaWebVersion(),
+        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 5000)),
+      ]);
+
+      if (result && !('error' in result && result.error) && Array.isArray(result.version)) {
+        WhatsAppBot.latestVersion = { version: result.version, fetchedAt: Date.now() };
+
+        return result.version;
+      }
+    } catch (err) {
+      this.logger?.warn?.({ err }, 'Failed to fetch latest WhatsApp Web version');
+    }
+
+    return undefined;
+  }
+
   public async internalConnect(
     additionalOptions: Partial<WhatsAppBot['config']> = {},
   ): Promise<void> {
     return new Promise<void>(async (resolve, reject) => {
       try {
         const { state, saveCreds } = await getBaileysAuth(this.auth);
+        const version = await this.resolveVersion();
 
         this.saveCreds = saveCreds;
 
@@ -282,7 +607,10 @@ export default class WhatsAppBot extends BotEvents implements IBot {
           },
           ...additionalOptions,
           ...this.config,
+          ...(version ? { version } : {}),
         });
+
+        this.lidMapper.attachStore(this.sock.signalRepository?.lidMapping);
 
         this.sock.ev.on('creds.update', saveCreds);
         this.store.bind(this.sock.ev);
@@ -368,6 +696,8 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     try {
       this.status = BotStatus.Offline;
 
+      await this.flushRecords();
+
       this.sock?.end(reason);
     } catch (err) {
       this.emit('error', err);
@@ -375,6 +705,7 @@ export default class WhatsAppBot extends BotEvents implements IBot {
   }
 
   public async logout(): Promise<void> {
+    await this.flushRecords();
     await this.sock?.logout();
   }
 
@@ -402,12 +733,11 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     updateMetadata: boolean = true,
   ) {
     try {
-      // Normaliza o chat.id primeiro
-      const normalizedId = this.safeNormalizeJid(chat.id);
-      if (!normalizedId) return;
+      const id = await this.resolveId(chat.id);
+      if (!id) return;
 
-      chat.id = normalizedId;
-      chat.type = isJidGroup(normalizedId) ? ChatType.Group : ChatType.PV;
+      chat.id = id;
+      chat.type = isGroupJid(id) ? ChatType.Group : ChatType.PV;
 
       if (chat.type == ChatType.Group) {
         if (updateMetadata) {
@@ -415,16 +745,12 @@ export default class WhatsAppBot extends BotEvents implements IBot {
             (await this.getChatProfileUrl(new Chat(chat.id))) || undefined;
 
           if (!metadata) {
-            try {
-              metadata = await this.sock.groupMetadata(chat.id);
-            } catch { }
+            metadata = (await this.getGroupMetadata(chat.id)) || undefined;
           } else if (!metadata.participants) {
-            try {
-              metadata = {
-                ...metadata,
-                ...(await this.sock.groupMetadata(chat.id)),
-              };
-            } catch { }
+            metadata = {
+              ...metadata,
+              ...((await this.getGroupMetadata(chat.id)) || {}),
+            };
 
             if (metadata.participant) {
               metadata.participants = [
@@ -443,30 +769,34 @@ export default class WhatsAppBot extends BotEvents implements IBot {
         }
 
         if (metadata?.participants) {
+          this.registerParticipants(metadata.participants);
+
           chat.users = [];
           chat.admins = [];
 
           for (const p of metadata.participants) {
-            const normalizedParticipantId = this.safeNormalizeJid(p.id);
-            if (!normalizedParticipantId) continue;
+            const participantId = await this.resolveId(p.phoneNumber || p.id);
+            if (!participantId) continue;
 
-            chat.users.push(normalizedParticipantId);
+            chat.users.push(participantId);
 
             if (p.admin == 'admin' || p.isAdmin) {
-              chat.admins.push(normalizedParticipantId);
-            } else if (p.isSuperAdmin) {
-              chat.leader = normalizedParticipantId;
-              chat.admins.push(normalizedParticipantId);
+              chat.admins.push(participantId);
+            } else if (p.admin == 'superadmin' || p.isSuperAdmin) {
+              chat.leader = participantId;
+              chat.admins.push(participantId);
             }
           }
         }
 
-        if (metadata?.subjectOwner) {
-          const normalizedOwner = this.safeNormalizeJid(metadata.subjectOwner);
-          if (normalizedOwner) {
-            chat.leader = normalizedOwner;
-          }
+        const owner = metadata?.ownerPn || metadata?.owner || metadata?.subjectOwnerPn || metadata?.subjectOwner;
+        if (owner) {
+          const ownerId = await this.resolveId(owner);
+          if (ownerId) chat.leader = ownerId;
         }
+      } else {
+        chat.phoneNumber = getPhoneNumber(id) || undefined;
+        chat.lid = this.lidMapper.getLID(id) || undefined;
       }
 
       if (metadata?.subject || metadata?.name) {
@@ -495,11 +825,15 @@ export default class WhatsAppBot extends BotEvents implements IBot {
 
   public async readUser(user: Partial<User>, metadata?: Partial<Contact>) {
     try {
-      // Normaliza o user.id primeiro
-      const normalizedId = this.safeNormalizeJid(user.id);
-      if (!normalizedId) return;
+      if (metadata?.id) {
+        this.lidMapper.register(metadata.id, metadata.phoneNumber, true);
+        this.lidMapper.register(metadata.id, metadata.lid, true);
+      }
 
-      user.id = normalizedId;
+      const id = await this.resolveId(user.id);
+      if (!id || !isUserJid(id)) return;
+
+      user.id = id;
 
       if (metadata?.imgUrl) {
         user.profileUrl = await this.getUserProfileUrl(new User(user.id));
@@ -577,44 +911,49 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     userId: string,
     fromId: string,
   ) {
-    // Normaliza todos os IDs
-    const normalizedChatId = this.safeNormalizeJid(chatId);
-    const normalizedUserId = this.safeNormalizeJid(userId);
-    const normalizedFromId = this.safeNormalizeJid(fromId);
+    const normalizedChatId = normalizeJid(chatId);
+    const normalizedUserId = await this.resolveId(userId);
+    const normalizedFromId = (await this.resolveId(fromId)) || normalizedUserId;
 
-    if (!normalizedChatId || !isJidGroup(normalizedChatId)) return;
-    if (!normalizedUserId || !normalizedFromId) return;
+    if (!normalizedChatId || !isGroupJid(normalizedChatId)) return;
+    if (!normalizedUserId) return;
 
     const event: UserEvent =
       action == 'join' ? 'add' : action == 'leave' ? 'remove' : action;
 
+    const metadata = this.groupMetadataCache.get<GroupMetadata>(normalizedChatId);
     let chat = await this.getChat(new Chat(normalizedChatId));
 
     if (!chat) {
-      if (!this.config.autoLoadGroupInfo) return;
-
-      chat = Chat.fromJSON({
-        id: normalizedChatId,
-        phoneNumber: getPhoneNumber(normalizedChatId),
-        type: ChatType.Group,
-      });
+      chat = Chat.fromJSON({ id: normalizedChatId, type: ChatType.Group });
     }
 
-    const fromUser =
-      (await this.getUser(new User(normalizedFromId))) ||
-      User.fromJSON({ id: normalizedFromId, phoneNumber: getPhoneNumber(normalizedFromId) });
-    const user =
-      (await this.getUser(new User(normalizedUserId))) ||
-      User.fromJSON({ id: normalizedUserId, phoneNumber: getPhoneNumber(normalizedUserId) });
+    if (!chat.name && metadata?.subject) chat.name = metadata.subject;
+
+    const toUser = async (id: string) => {
+      const stored = await this.getUser(new User(id));
+      if (stored) return stored;
+
+      return User.fromJSON({
+        id,
+        phoneNumber: getPhoneNumber(id),
+        lid: this.lidMapper.getLID(id),
+      });
+    };
+
+    const fromUser = await toUser(normalizedFromId);
+    const user = await toUser(normalizedUserId);
 
     let users = chat.users || [];
-    const admins = chat.admins || [];
+    let admins = chat.admins || [];
 
-    if (event == 'add') users.push(user.id);
-    if (event == 'remove') users = users.filter((u) => u != user.id);
-    if (event == 'demote')
-      chat.admins = admins.filter((admin) => admin != user.id);
-    if (event == 'promote') admins.push(user.id);
+    if (event == 'add' && !users.includes(user.id)) users.push(user.id);
+    if (event == 'remove') {
+      users = users.filter((u) => u != user.id);
+      admins = admins.filter((admin) => admin != user.id);
+    }
+    if (event == 'demote') admins = admins.filter((admin) => admin != user.id);
+    if (event == 'promote' && !admins.includes(user.id)) admins.push(user.id);
 
     chat.users = users;
     chat.admins = admins;
@@ -635,15 +974,23 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     return (await this.getChat(chat))?.name || '';
   }
 
-  public async setChatName(chat: Chat, name: string) {
-    const normalizedId = this.safeNormalizeJid(chat.id);
-    if (!normalizedId || !isJidGroup(normalizedId)) return;
+  /** Garante que o chat é um grupo e que o bot é administrador. Retorna o JID do grupo. */
+  private async requireGroupAdmin(chat: Chat): Promise<string> {
+    const id = normalizeJid(chat?.id);
+    if (!id || !isGroupJid(id)) return '';
 
     const admins = await this.getChatAdmins(chat);
 
-    if (admins.length && !admins.includes(this.id)) return;
+    if (admins.length && !admins.includes(this.id)) return '';
 
-    await this.sock.groupUpdateSubject(normalizedId, name);
+    return id;
+  }
+
+  public async setChatName(chat: Chat, name: string) {
+    const id = await this.requireGroupAdmin(chat);
+    if (!id) return;
+
+    await this.sock.groupUpdateSubject(id, name);
   }
 
   public async getChatDescription(chat: Chat) {
@@ -654,14 +1001,10 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     chat: Chat,
     description: string,
   ): Promise<any> {
-    const normalizedId = this.safeNormalizeJid(chat.id);
-    if (!normalizedId || !isJidGroup(normalizedId)) return;
+    const id = await this.requireGroupAdmin(chat);
+    if (!id) return;
 
-    const admins = await this.getChatAdmins(chat);
-
-    if (admins.length && !admins.includes(this.id)) return;
-
-    await this.sock.groupUpdateDescription(normalizedId, description);
+    await this.sock.groupUpdateDescription(id, description);
   }
 
   public async getChatProfile(chat: Chat, lowQuality?: boolean) {
@@ -672,12 +1015,12 @@ export default class WhatsAppBot extends BotEvents implements IBot {
 
   public async getChatProfileUrl(chat: Chat, lowQuality?: boolean) {
     try {
-      const normalizedId = this.safeNormalizeJid(chat.id);
-      if (!normalizedId) return '';
+      const id = await this.resolveId(chat.id);
+      if (!id) return '';
 
       return (
         (await this.sock.profilePictureUrl(
-          normalizedId,
+          id,
           lowQuality ? 'preview' : 'image',
         )) || ''
       );
@@ -687,21 +1030,17 @@ export default class WhatsAppBot extends BotEvents implements IBot {
   }
 
   public async setChatProfile(chat: Chat, image: Buffer) {
-    const normalizedId = this.safeNormalizeJid(chat.id);
-    if (!normalizedId || !isJidGroup(normalizedId)) return;
+    const id = await this.requireGroupAdmin(chat);
+    if (!id) return;
 
-    const admins = await this.getChatAdmins(chat);
-
-    if (admins.length && !admins.includes(this.id)) return;
-
-    await this.sock.updateProfilePicture(normalizedId, image);
+    await this.sock.updateProfilePicture(id, image);
   }
 
   public async updateChat(chat: { id: string } & Partial<Chat>): Promise<void> {
-    const normalizedId = this.safeNormalizeJid(chat.id);
-    if (!normalizedId) return;
+    const id = await this.resolveId(chat.id);
+    if (!id) return;
 
-    chat.id = normalizedId;
+    chat.id = id;
 
     const chatData = await this.getChat(new Chat(chat.id));
 
@@ -721,40 +1060,49 @@ export default class WhatsAppBot extends BotEvents implements IBot {
 
     const newChat = Chat.fromJSON({ ...(chatData || {}), ...chat });
 
-    newChat.type = isJidGroup(chat.id) ? ChatType.Group : ChatType.PV;
-    newChat.phoneNumber = newChat.phoneNumber || getPhoneNumber(chat.id);
+    newChat.type = isGroupJid(chat.id) ? ChatType.Group : ChatType.PV;
 
-    await this.auth.set(`chats-${chat.id}`, newChat.toJSON());
+    if (newChat.type == ChatType.PV) {
+      newChat.phoneNumber = getPhoneNumber(chat.id) || newChat.phoneNumber;
+      newChat.lid = this.lidMapper.getLID(chat.id) || newChat.lid;
+    }
+
+    this.setRecord(`chats-${chat.id}`, newChat.toJSON());
 
     this.ev.emit('chat', { action: chatData != null ? 'update' : 'add', chat });
   }
 
   public async removeChat(chat: Chat): Promise<void> {
-    const normalizedId = this.safeNormalizeJid(chat.id);
-    if (!normalizedId) return;
+    const id = await this.resolveId(chat.id);
+    if (!id) return;
 
-    await this.auth.remove(`chats-${normalizedId}`);
+    this.removeRecord(`chats-${id}`);
+
+    if (isGroupJid(id)) this.invalidateGroupMetadata(id);
 
     this.ev.emit('chat', { action: 'remove', chat });
   }
 
   public async getChat(chat: Chat): Promise<Chat | null> {
-    const normalizedId = this.safeNormalizeJid(chat.id);
-    if (!normalizedId) return null;
+    const id = await this.resolveId(chat.id);
+    if (!id) return null;
 
-    const chatData = await this.auth.get(`chats-${normalizedId}`);
+    const chatData = await this.getRecord(`chats-${id}`);
 
     if (!chatData) return null;
 
-    if (!chat.name || !chat.profileUrl) {
-      const user = await this.getUser(new User(normalizedId));
+    const stored = Chat.fromJSON(chatData);
+
+    if (!stored.name || !stored.profileUrl) {
+      const user = isUserJid(id) ? await this.getUser(new User(id)) : null;
 
       if (user != null) {
-        return Chat.fromJSON({ ...chat, ...user });
+        stored.name = stored.name || user.name || user.savedName;
+        stored.profileUrl = stored.profileUrl || user.profileUrl;
       }
     }
 
-    return Chat.fromJSON(chatData);
+    return stored;
   }
 
   public async getChats(): Promise<string[]> {
@@ -774,7 +1122,13 @@ export default class WhatsAppBot extends BotEvents implements IBot {
   public async getChatAdmins(chat: Chat): Promise<string[]> {
     const chatReaded = await this.getChat(chat);
 
-    if (!chatReaded) return [];
+    if (!chatReaded) {
+      if (!isGroupJid(normalizeJid(chat?.id))) return [];
+
+      await this.readChat(chat);
+
+      return (await this.getChat(chat))?.admins || [];
+    }
 
     if (chatReaded.admins?.length) {
       return chatReaded.admins || [];
@@ -791,66 +1145,37 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     return (await this.getChat(chat))?.leader || '';
   }
 
+  private async participantsAction(chat: Chat, user: User, action: 'add' | 'remove' | 'promote' | 'demote') {
+    const chatId = await this.requireGroupAdmin(chat);
+    const userId = await this.resolveId(user.id);
+
+    if (!chatId || !userId) return;
+
+    await this.sock.groupParticipantsUpdate(chatId, [userId], action);
+
+    this.invalidateGroupMetadata(chatId);
+  }
+
   public async addUserInChat(chat: Chat, user: User) {
-    const normalizedChatId = this.safeNormalizeJid(chat.id);
-    const normalizedUserId = this.safeNormalizeJid(user.id);
-
-    if (!normalizedChatId || !normalizedUserId) return;
-    if (!isJidGroup(normalizedChatId)) return;
-
-    const admins = await this.getChatAdmins(chat);
-
-    if (admins.length && !admins.includes(this.id)) return;
-
-    await this.sock.groupParticipantsUpdate(normalizedChatId, [normalizedUserId], 'add');
+    await this.participantsAction(chat, user, 'add');
   }
 
   public async removeUserInChat(chat: Chat, user: User) {
-    const normalizedChatId = this.safeNormalizeJid(chat.id);
-    const normalizedUserId = this.safeNormalizeJid(user.id);
-
-    if (!normalizedChatId || !normalizedUserId) return;
-    if (!isJidGroup(normalizedChatId)) return;
-
-    const admins = await this.getChatAdmins(chat);
-
-    if (admins.length && !admins.includes(this.id)) return;
-
-    await this.sock.groupParticipantsUpdate(normalizedChatId, [normalizedUserId], 'remove');
+    await this.participantsAction(chat, user, 'remove');
   }
 
   public async promoteUserInChat(chat: Chat, user: User): Promise<void> {
-    const normalizedChatId = this.safeNormalizeJid(chat.id);
-    const normalizedUserId = this.safeNormalizeJid(user.id);
-
-    if (!normalizedChatId || !normalizedUserId) return;
-    if (!isJidGroup(normalizedChatId)) return;
-
-    const admins = await this.getChatAdmins(chat);
-
-    if (admins.length && !admins.includes(this.id)) return;
-
-    await this.sock.groupParticipantsUpdate(normalizedChatId, [normalizedUserId], 'promote');
+    await this.participantsAction(chat, user, 'promote');
   }
 
   public async demoteUserInChat(chat: Chat, user: User): Promise<void> {
-    const normalizedChatId = this.safeNormalizeJid(chat.id);
-    const normalizedUserId = this.safeNormalizeJid(user.id);
-
-    if (!normalizedChatId || !normalizedUserId) return;
-    if (!isJidGroup(normalizedChatId)) return;
-
-    const admins = await this.getChatAdmins(chat);
-
-    if (admins.length && !admins.includes(this.id)) return;
-
-    await this.sock.groupParticipantsUpdate(normalizedChatId, [normalizedUserId], 'demote');
+    await this.participantsAction(chat, user, 'demote');
   }
 
   public async changeChatStatus(chat: Chat, status: ChatStatus): Promise<void> {
-    const normalizedId = this.safeNormalizeJid(chat.id);
+    const id = await this.resolveId(chat.id);
 
-    if (!normalizedId) {
+    if (!id) {
       this.logger?.error?.('Invalid chat.id for changeChatStatus:', chat.id);
       return;
     }
@@ -858,7 +1183,7 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     try {
       await this.sock.sendPresenceUpdate(
         WAStatus[status] || 'available',
-        normalizedId,
+        id,
       );
     } catch (error) {
       this.logger?.error?.('Error updating chat status:', error);
@@ -870,12 +1195,12 @@ export default class WhatsAppBot extends BotEvents implements IBot {
   }
 
   public async leaveChat(chat: Chat): Promise<void> {
-    const normalizedId = this.safeNormalizeJid(chat.id);
-    if (!normalizedId || !isJidGroup(normalizedId)) return;
+    const id = normalizeJid(chat.id);
+    if (!id || !isGroupJid(id)) return;
 
     if ((await this.getChat(chat)) == null) return;
 
-    await this.sock.groupLeave(normalizedId);
+    await this.sock.groupLeave(id);
 
     await this.removeChat(chat);
   }
@@ -887,32 +1212,172 @@ export default class WhatsAppBot extends BotEvents implements IBot {
   }
 
   public async getChatInvite(chat: Chat): Promise<string> {
-    const normalizedId = this.safeNormalizeJid(chat.id);
-    if (!normalizedId || !isJidGroup(normalizedId)) return '';
+    const id = await this.requireGroupAdmin(chat);
+    if (!id) return '';
 
-    const admins = await this.getChatAdmins(chat);
-
-    if (admins.length && !admins.includes(this.id)) return '';
-
-    return (await this.sock.groupInviteCode(normalizedId)) || '';
+    return (await this.sock.groupInviteCode(id)) || '';
   }
 
   public async revokeChatInvite(chat: Chat): Promise<string> {
-    const normalizedId = this.safeNormalizeJid(chat.id);
-    if (!normalizedId || !isJidGroup(normalizedId)) return '';
+    const id = await this.requireGroupAdmin(chat);
+    if (!id) return '';
 
-    const admins = await this.getChatAdmins(chat);
+    return (await this.sock.groupRevokeInvite(id)) || '';
+  }
 
-    if (admins.length && !admins.includes(this.id)) return '';
+  /**
+   * Define se só administradores podem enviar mensagens no grupo.
+   * @param enabled - `true` fecha o grupo para membros comuns
+   */
+  public async setChatAnnounce(chat: Chat, enabled: boolean): Promise<void> {
+    const id = await this.requireGroupAdmin(chat);
+    if (!id) return;
 
-    return (await this.sock.groupRevokeInvite(normalizedId)) || '';
+    await this.sock.groupSettingUpdate(id, enabled ? 'announcement' : 'not_announcement');
+  }
+
+  /**
+   * Define se só administradores podem editar nome, descrição e foto do grupo.
+   */
+  public async setChatLocked(chat: Chat, enabled: boolean): Promise<void> {
+    const id = await this.requireGroupAdmin(chat);
+    if (!id) return;
+
+    await this.sock.groupSettingUpdate(id, enabled ? 'locked' : 'unlocked');
+  }
+
+  /**
+   * Ativa ou desativa mensagens temporárias.
+   * @param seconds - 0 desativa; valores comuns: 86400 (24 h), 604800 (7 dias), 7776000 (90 dias)
+   */
+  public async setChatEphemeral(chat: Chat, seconds: number): Promise<void> {
+    const id = await this.resolveId(chat.id);
+    if (!id) return;
+
+    if (isGroupJid(id)) {
+      const groupId = await this.requireGroupAdmin(chat);
+      if (!groupId) return;
+
+      await this.sock.groupToggleEphemeral(groupId, seconds);
+    } else {
+      await this.sock.sendMessage(id, { disappearingMessagesInChat: seconds || false });
+    }
+  }
+
+  /**
+   * Define se qualquer membro pode adicionar participantes.
+   */
+  public async setChatMemberAddMode(chat: Chat, allMembers: boolean): Promise<void> {
+    const id = await this.requireGroupAdmin(chat);
+    if (!id) return;
+
+    await this.sock.groupMemberAddMode(id, allMembers ? 'all_member_add' : 'admin_add');
+  }
+
+  /**
+   * Define se a entrada no grupo exige aprovação de um administrador.
+   */
+  public async setChatJoinApproval(chat: Chat, enabled: boolean): Promise<void> {
+    const id = await this.requireGroupAdmin(chat);
+    if (!id) return;
+
+    await this.sock.groupJoinApprovalMode(id, enabled ? 'on' : 'off');
+  }
+
+  /** Lista os pedidos de entrada pendentes num grupo. */
+  public async getChatJoinRequests(chat: Chat): Promise<WAJoinRequest[]> {
+    const id = await this.requireGroupAdmin(chat);
+    if (!id) return [];
+
+    const requests = (await this.sock.groupRequestParticipantsList(id)) || [];
+    const result: WAJoinRequest[] = [];
+
+    for (const request of requests) {
+      const raw = request.jid || request.lid || request.phone_number || '';
+      if (!raw) continue;
+
+      this.lidMapper.register(request.jid, request.phone_number, true);
+      this.lidMapper.register(request.lid, request.phone_number || request.jid, true);
+
+      const userId = await this.resolveId(request.phone_number || raw);
+      const stored = await this.getUser(new User(userId));
+      const user = stored || User.fromJSON({ id: userId, phoneNumber: getPhoneNumber(userId) });
+
+      user.lid = user.lid || this.lidMapper.getLID(userId);
+
+      const requestedAt = Number(request.request_time || request.t || 0) * 1000 || undefined;
+
+      result.push({ user, requestedAt, method: request.request_method || undefined });
+    }
+
+    return result;
+  }
+
+  /**
+   * Aprova ou recusa pedidos de entrada.
+   * @returns IDs processados com sucesso
+   */
+  public async updateChatJoinRequests(
+    chat: Chat,
+    users: User[],
+    action: 'approve' | 'reject',
+  ): Promise<string[]> {
+    const id = await this.requireGroupAdmin(chat);
+    if (!id) return [];
+
+    const targets: string[] = [];
+
+    for (const user of users) {
+      const userId = await this.resolveId(user.id);
+      if (!userId) continue;
+
+      // O WhatsApp identifica pedidos pelo LID em grupos novos e pelo PN em grupos antigos.
+      const lid = isLidJid(userId) ? userId : this.lidMapper.getLID(userId);
+
+      targets.push(lid || userId);
+    }
+
+    if (!targets.length) return [];
+
+    const response = (await this.sock.groupRequestParticipantsUpdate(id, targets, action)) || [];
+
+    this.invalidateGroupMetadata(id);
+
+    const processed: string[] = [];
+
+    for (const item of response) {
+      if (item.status && String(item.status) !== '200') continue;
+
+      const processedId = await this.resolveId(item.jid);
+      if (processedId) processed.push(processedId);
+    }
+
+    return processed;
+  }
+
+  /** Consulta os dados de um grupo pelo código de convite, sem entrar nele. */
+  public async getChatInviteInfo(code: string): Promise<Chat | null> {
+    const inviteCode = `${code || ''}`.replace('https://chat.whatsapp.com/', '').trim();
+    if (!inviteCode) return null;
+
+    const metadata = await this.sock.groupGetInviteInfo(inviteCode);
+    if (!metadata?.id) return null;
+
+    const chat = new Chat(metadata.id, ChatType.Group, metadata.subject);
+
+    chat.description = metadata.desc || undefined;
+
+    const owner = metadata.ownerPn || metadata.owner;
+    if (owner) chat.leader = await this.resolveId(owner);
+
+    return chat;
   }
 
   public async rejectCall(call: Call): Promise<void> {
-    const normalizedChatId = this.safeNormalizeJid(call.chat.id);
-    if (!normalizedChatId) return;
+    const chatId = call.extra?.from || (await this.resolveId(call.chat.id));
+    if (!chatId) return;
 
-    await this.sock.rejectCall(call.id, normalizedChatId);
+    await this.sock.rejectCall(call.id, chatId);
   }
 
   //! ********************************* USER *********************************
@@ -928,11 +1393,14 @@ export default class WhatsAppBot extends BotEvents implements IBot {
   }
 
   public async getUserDescription(user: User): Promise<string> {
-    const normalizedId = this.safeNormalizeJid(user.id);
-    if (!normalizedId) return '';
+    const id = await this.resolveId(user.id);
+    if (!id) return '';
 
-    const result = await this.sock.fetchStatus(normalizedId) as any;
-    return (Array.isArray(result) ? result[0]?.status : result?.status) || '';
+    const result = await this.sock.fetchStatus(id) as any;
+    // Baileys 7 retorna [{ id, status: { status, setAt } }]
+    const entry = Array.isArray(result) ? result[0]?.status : result?.status;
+
+    return (typeof entry === 'string' ? entry : entry?.status) || '';
   }
 
   public async setUserDescription(
@@ -952,12 +1420,12 @@ export default class WhatsAppBot extends BotEvents implements IBot {
 
   public async getUserProfileUrl(user: User, lowQuality?: boolean) {
     try {
-      const normalizedId = this.safeNormalizeJid(user.id);
-      if (!normalizedId) return '';
+      const id = await this.resolveId(user.id);
+      if (!id) return '';
 
       return (
         (await this.sock.profilePictureUrl(
-          normalizedId,
+          id,
           lowQuality ? 'preview' : 'image',
         )) || ''
       );
@@ -973,10 +1441,10 @@ export default class WhatsAppBot extends BotEvents implements IBot {
   }
 
   public async getUser(user: User): Promise<User | null> {
-    const normalizedId = this.safeNormalizeJid(user.id);
-    if (!normalizedId) return null;
+    const id = await this.resolveId(user.id);
+    if (!id) return null;
 
-    const userData = await this.auth.get(`users-${normalizedId}`);
+    const userData = await this.getRecord(`users-${id}`);
 
     if (!userData) return null;
 
@@ -990,10 +1458,15 @@ export default class WhatsAppBot extends BotEvents implements IBot {
   }
 
   public async updateUser(user: { id: string } & Partial<User>): Promise<void> {
-    const normalizedId = this.safeNormalizeJid(user.id);
-    if (!normalizedId) return;
+    const id = await this.resolveId(user.id);
+    if (!id) return;
 
-    user.id = normalizedId;
+    user.id = id;
+
+    if (isUserJid(id)) {
+      user.phoneNumber = getPhoneNumber(id) || undefined;
+      user.lid = this.lidMapper.getLID(id) || user.lid || undefined;
+    }
 
     const userData = await this.getUser(new User(user.id));
 
@@ -1013,9 +1486,7 @@ export default class WhatsAppBot extends BotEvents implements IBot {
 
     const newUser = User.fromJSON({ ...(userData || {}), ...user });
 
-    newUser.phoneNumber = newUser.phoneNumber || getPhoneNumber(user.id);
-
-    await this.auth.set(`users-${user.id}`, newUser.toJSON());
+    this.setRecord(`users-${user.id}`, newUser.toJSON());
   }
 
   public async setUsers(users: User[]): Promise<void> {
@@ -1023,24 +1494,47 @@ export default class WhatsAppBot extends BotEvents implements IBot {
   }
 
   public async removeUser(user: User): Promise<void> {
-    const normalizedId = this.safeNormalizeJid(user.id);
-    if (!normalizedId) return;
+    const id = await this.resolveId(user.id);
+    if (!id) return;
 
-    await this.auth.remove(`users-${normalizedId}`);
+    this.removeRecord(`users-${id}`);
   }
 
   public async blockUser(user: User) {
-    const normalizedId = this.safeNormalizeJid(user.id);
-    if (!normalizedId || normalizedId == this.id) return;
+    const id = await this.resolveId(user.id);
+    if (!id || id == this.id) return;
 
-    await this.sock.updateBlockStatus(normalizedId, 'block');
+    await this.sock.updateBlockStatus(id, 'block');
   }
 
   public async unblockUser(user: User) {
-    const normalizedId = this.safeNormalizeJid(user.id);
-    if (!normalizedId || normalizedId == this.id) return;
+    const id = await this.resolveId(user.id);
+    if (!id || id == this.id) return;
 
-    await this.sock.updateBlockStatus(normalizedId, 'unblock');
+    await this.sock.updateBlockStatus(id, 'unblock');
+  }
+
+  /** Lista os usuários bloqueados (IDs canônicos). */
+  public async getBlockedUsers(): Promise<string[]> {
+    const list = (await this.sock.fetchBlocklist()) || [];
+    const result: string[] = [];
+
+    for (const id of list) {
+      const resolved = await this.resolveId(id);
+      if (resolved) result.push(resolved);
+    }
+
+    return result;
+  }
+
+  /**
+   * Passa a receber eventos `presence` (digitando, online...) deste chat.
+   */
+  public async subscribePresence(chat: Chat): Promise<void> {
+    const id = await this.resolveId(chat.id);
+    if (!id) return;
+
+    await this.sock.presenceSubscribe(id);
   }
 
   //! ******************************** BOT ********************************
@@ -1075,28 +1569,47 @@ export default class WhatsAppBot extends BotEvents implements IBot {
 
   //! ******************************* MESSAGE *******************************
 
-  public async readMessage(message: Message): Promise<void> {
-    const normalizedChatId = this.safeNormalizeJid(message.chat.id);
-    const normalizedUserId = this.safeNormalizeJid(message.user.id);
+  /**
+   * Chave da mensagem no WhatsApp.
+   * Usa a chave original recebida (preserva LID/PN exatamente como o WhatsApp enviou);
+   * sem ela, monta a chave a partir dos IDs canônicos.
+   */
+  public async getMessageKey(message: Message): Promise<proto.IMessageKey | null> {
+    const raw = message?.extra?.key;
 
-    if (!normalizedChatId || !normalizedUserId) return;
+    if (raw?.id && raw.id == message.id && raw.remoteJid) {
+      return {
+        remoteJid: raw.remoteJid,
+        id: raw.id,
+        fromMe: !!raw.fromMe,
+        participant: raw.participant || undefined,
+      };
+    }
 
-    const key = {
-      remoteJid: normalizedChatId,
-      id: message.id || '',
-      fromMe: message.fromMe || normalizedUserId == this.id,
-      participant: isJidGroup(normalizedChatId)
-        ? normalizedUserId || this.id || undefined
-        : undefined,
-      toJSON: () => key,
+    const chatId = await this.resolveId(message?.chat?.id);
+    if (!chatId || !message?.id) return null;
+
+    const userId = await this.resolveId(message.user?.id);
+    const fromMe = !!message.fromMe || !userId || userId == this.id;
+
+    return {
+      remoteJid: chatId,
+      id: message.id,
+      fromMe,
+      participant: isGroupJid(chatId) && !fromMe ? userId : undefined,
     };
+  }
+
+  public async readMessage(message: Message): Promise<void> {
+    const key = await this.getMessageKey(message);
+    if (!key) return;
 
     const chat = await this.getChat(message.chat);
 
-    if (chat != null) {
+    if (chat != null && chat.unreadCount) {
       await this.updateChat({
-        id: normalizedChatId,
-        unreadCount: (chat.unreadCount || 1) - 1,
+        id: chat.id,
+        unreadCount: Math.max(chat.unreadCount - 1, 0),
       });
     }
 
@@ -1104,19 +1617,8 @@ export default class WhatsAppBot extends BotEvents implements IBot {
   }
 
   public async removeMessage(message: Message) {
-    const normalizedChatId = this.safeNormalizeJid(message.chat.id);
-    const normalizedUserId = this.safeNormalizeJid(message.user.id);
-
-    if (!normalizedChatId || !normalizedUserId) return;
-
-    const key: proto.IMessageKey = {
-      remoteJid: normalizedChatId,
-      id: message.id,
-      fromMe: message.fromMe || normalizedUserId == this.id,
-      participant: isJidGroup(normalizedChatId)
-        ? normalizedUserId || this.id
-        : undefined,
-    };
+    const key = await this.getMessageKey(message);
+    if (!key) return;
 
     await this.sock.chatModify(
       {
@@ -1126,32 +1628,63 @@ export default class WhatsAppBot extends BotEvents implements IBot {
           timestamp: Number(message.timestamp || Date.now()),
         },
       },
-      normalizedChatId,
+      key.remoteJid!,
     );
   }
 
   public async deleteMessage(message: Message) {
-    const normalizedChatId = this.safeNormalizeJid(message.chat.id);
-    const normalizedUserId = this.safeNormalizeJid(message.user.id);
+    const key = await this.getMessageKey(message);
+    if (!key) return;
 
-    if (!normalizedChatId || !normalizedUserId) return;
-
-    const key: proto.IMessageKey = {
-      remoteJid: normalizedChatId,
-      id: message.id,
-      fromMe: message.fromMe || normalizedUserId == this.id,
-      participant: isJidGroup(normalizedChatId)
-        ? normalizedUserId || this.id
-        : undefined,
-    };
-
-    if (key.participant && key.participant != this.id) {
-      const admins = await this.getChatAdmins(message.chat);
+    if (!key.fromMe && isGroupJid(key.remoteJid)) {
+      const admins = await this.getChatAdmins(new Chat(key.remoteJid!));
 
       if (admins.length && !admins.includes(this.id)) return;
     }
 
-    await this.sock.sendMessage(normalizedChatId, { delete: key });
+    await this.sock.sendMessage(key.remoteJid!, { delete: key });
+  }
+
+  /**
+   * Fixa ou desafixa uma mensagem no chat.
+   * @param duration - Tempo de fixação (24 h, 7 dias ou 30 dias). Use 0 para desafixar.
+   */
+  public async pinMessage(message: Message, duration: WAPinDuration | 0 = 604800): Promise<void> {
+    const key = await this.getMessageKey(message);
+    if (!key) return;
+
+    await this.sock.sendMessage(key.remoteJid!, {
+      pin: key,
+      type: duration ? proto.PinInChat.Type.PIN_FOR_ALL : proto.PinInChat.Type.UNPIN_FOR_ALL,
+      ...(duration ? { time: duration } : {}),
+    } as any);
+  }
+
+  /** Marca ou desmarca uma mensagem com estrela. */
+  public async starMessage(message: Message, star: boolean = true): Promise<void> {
+    const key = await this.getMessageKey(message);
+    if (!key) return;
+
+    await this.sock.star(key.remoteJid!, [{ id: key.id!, fromMe: !!key.fromMe }], star);
+  }
+
+  /**
+   * Encaminha uma mensagem recebida ou enviada (precisa estar no cache de mensagens).
+   */
+  public async forwardMessage(chat: Chat, message: Message): Promise<Message> {
+    const target = await this.resolveId(chat.id);
+    if (!target) throw new Error(`Invalid chat ID: ${chat.id}`);
+
+    const original = this.getCachedWAMessage(message.extra?.key?.id || message.id);
+    if (!original) {
+      throw new Error('A mensagem não está mais disponível para encaminhar.');
+    }
+
+    const sent = await this.sock.sendMessage(target, { forward: original });
+
+    this.cacheWAMessage(sent);
+
+    return await new ConvertWAMessage(this, sent!).get();
   }
 
   public async addReaction(message: ReactionMessage): Promise<void> {
@@ -1180,12 +1713,12 @@ export default class WhatsAppBot extends BotEvents implements IBot {
       buttonParamsJson: string;
     }>;
   }): Promise<any> {
-    const normalizedJid = this.safeNormalizeJid(jid);
-    if (!normalizedJid) {
+    const target = await this.resolveId(jid);
+    if (!target) {
       throw new Error(`Invalid JID: ${jid}`);
     }
 
-    return await sendInteractiveMessage(this.sock, normalizedJid, content);
+    return await sendInteractiveMessage(this.sock, target, content);
   }
 
 
@@ -1193,24 +1726,23 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     const waMSG = new ConvertToWAMessage(this, content);
     await waMSG.refactory(content);
 
-    // Normaliza o chatId antes de enviar
-    const normalizedChatId = this.safeNormalizeJid(waMSG.chatId);
+    const chatId = waMSG.chatId;
 
-    if (!normalizedChatId) {
-      throw new Error(`Invalid chat ID: ${waMSG.chatId}`);
+    if (!chatId) {
+      throw new Error(`Invalid chat ID: ${content?.chat?.id}`);
     }
 
     // Se a mensagem usa baileys_helper
     if (waMSG.waMessage.__useBaileysHelper) {
       delete waMSG.waMessage.__useBaileysHelper;
 
-      // Importa dinamicamente o baileys_helper
-
       const sentInteractiveMessage = await sendInteractiveMessage(
         this.sock,
-        normalizedChatId,
+        chatId,
         waMSG.waMessage
       );
+
+      this.cacheWAMessage(sentInteractiveMessage);
 
       return await new ConvertWAMessage(this, sentInteractiveMessage).get();
     }
@@ -1218,30 +1750,30 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     // Lógica normal de envio
     if (waMSG.isRelay) {
       const msgRes = generateWAMessageFromContent(
-        normalizedChatId,
+        chatId,
         waMSG.waMessage,
         { ...waMSG.options, userJid: this.id },
       );
 
-      try {
-        await this.sock.relayMessage(normalizedChatId, msgRes.message!, {
-          ...waMSG.options,
-          messageId: msgRes.key.id,
-        });
-      } catch (err) {
-        throw err;
-      }
+      await this.sock.relayMessage(chatId, msgRes.message!, {
+        ...waMSG.options,
+        messageId: msgRes.key.id,
+      });
+
+      this.cacheWAMessage(msgRes);
 
       return await new ConvertWAMessage(this, msgRes).get();
     }
 
     const sendedMessage = await this.sock.sendMessage(
-      normalizedChatId,
+      chatId,
       waMSG.waMessage,
       waMSG.options,
     );
 
     if (typeof sendedMessage == 'boolean') return content;
+
+    this.cacheWAMessage(sendedMessage);
 
     const msgRes =
       (await new ConvertWAMessage(this, sendedMessage!).get()) || content;
@@ -1276,8 +1808,7 @@ export default class WhatsAppBot extends BotEvents implements IBot {
       {},
       {
         logger: this.logger,
-        reuploadRequest: (m: proto.IWebMessageInfo) =>
-          Promise.resolve(m as any),
+        reuploadRequest: (m) => this.sock.updateMediaMessage(m),
       },
     );
 
@@ -1311,8 +1842,7 @@ export default class WhatsAppBot extends BotEvents implements IBot {
           } as any),
           {
             logger: this.logger,
-            reuploadRequest: (m: proto.IWebMessageInfo) =>
-              Promise.resolve(m as any),
+            reuploadRequest: (m) => this.sock.updateMediaMessage(m),
           },
         );
 
@@ -1348,13 +1878,20 @@ export default class WhatsAppBot extends BotEvents implements IBot {
   }
 
   public async onExists(id: string): Promise<{ exists: boolean; id: string }> {
-    const normalizedId = this.safeNormalizeJid(id);
+    const normalizedId = await this.resolveId(id);
     if (!normalizedId) return { exists: false, id };
+
+    if (isLidJid(normalizedId)) return { exists: true, id: normalizedId };
 
     const user = await this.sock.onWhatsApp(normalizedId);
 
-    if (user && user.length > 0)
-      return { exists: user[0].exists, id: user[0].jid };
+    if (user && user.length > 0) {
+      const result: any = user[0];
+
+      if (result.lid) this.lidMapper.register(result.lid, result.jid, true);
+
+      return { exists: !!result.exists, id: normalizeJid(result.jid) || normalizedId };
+    }
 
     return { exists: false, id: normalizedId };
   }

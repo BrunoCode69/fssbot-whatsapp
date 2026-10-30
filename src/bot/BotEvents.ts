@@ -8,6 +8,13 @@ import Chat from '../modules/chat/Chat';
 import User from '../modules/user/User';
 import Call from '../models/Call';
 import Message from '../messages/Message';
+import type {
+  BlocklistEvent,
+  GroupJoinRequestEvent,
+  GroupUpdateEvent,
+  IdMappingEvent,
+  PresenceEvent,
+} from './BotEventTypes';
 /**
  * Mapeia os eventos disponíveis para um bot.
  */
@@ -51,6 +58,16 @@ export type BotEventsMap = {
   message: Message;
   /** Ocorre ao receber uma atualizaçãod e chamada */
   call: Call;
+  /** [WhatsApp] Configuração de um grupo alterada (nome, descrição, permissões...). */
+  'group-update': GroupUpdateEvent;
+  /** [WhatsApp] Pedido de entrada num grupo com aprovação. */
+  'group-join-request': GroupJoinRequestEvent;
+  /** [WhatsApp] Presença de um contato atualizada. */
+  presence: PresenceEvent;
+  /** [WhatsApp] Lista de bloqueados alterada. */
+  blocklist: BlocklistEvent;
+  /** [WhatsApp] Um LID foi associado a um número de telefone. */
+  'id-mapping': IdMappingEvent;
   /** Ocorre quando um erro é detectado. */
   error: Error;
 };

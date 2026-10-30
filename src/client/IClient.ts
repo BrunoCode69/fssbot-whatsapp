@@ -13,7 +13,7 @@ import IAuth from "./IAuth";
 
 import IBot from "../bot/IBot";
 
-import MessageHandler, { MessageHandlerConfig } from "../utils/MessageHandler";
+import MessageHandler, { type MessageHandlerConfig } from "../utils/MessageHandler";
 import Call from "../models/Call";
 
 export default interface IClient<Bot extends IBot = IBot> extends ClientEvents {

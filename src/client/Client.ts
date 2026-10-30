@@ -24,7 +24,7 @@ import IBot from '../bot/IBot';
 import BotBase from '../bot/BotBase';
 
 import { sleep, getError } from '../utils/Generic';
-import MessageHandler, { MessageHandlerConfig } from '../utils/MessageHandler';
+import MessageHandler, { type MessageHandlerConfig } from '../utils/MessageHandler';
 import Call from '../models/Call';
 
 export default class Client<Bot extends IBot = IBot>
@@ -215,6 +215,49 @@ export default class Client<Bot extends IBot = IBot>
       );
     });
 
+    const link = { clientId: this.id, botId: this.bot.id };
+    const linkUser = (user?: User) => (user ? User.apply(user, link) : undefined);
+
+    this.bot.on('group-update', (update) => {
+      try {
+        this.emit('group-update', {
+          ...update,
+          chat: Chat.apply(update.chat, link),
+          fromUser: linkUser(update.fromUser),
+        });
+      } catch (err) {
+        this.emit('error', getError(err));
+      }
+    });
+
+    this.bot.on('group-join-request', (update) => {
+      try {
+        this.emit('group-join-request', {
+          ...update,
+          chat: Chat.apply(update.chat, link),
+          user: User.apply(update.user, link),
+          fromUser: linkUser(update.fromUser),
+        });
+      } catch (err) {
+        this.emit('error', getError(err));
+      }
+    });
+
+    this.bot.on('presence', (update) => {
+      try {
+        this.emit('presence', {
+          ...update,
+          chat: Chat.apply(update.chat, link),
+          user: User.apply(update.user, link),
+        });
+      } catch (err) {
+        this.emit('error', getError(err));
+      }
+    });
+
+    this.bot.on('blocklist', (update) => this.emit('blocklist', update));
+    this.bot.on('id-mapping', (update) => this.emit('id-mapping', update));
+
     this.bot.on('error', (err) => {
       try {
         this.emit('error', getError(err));
@@ -317,6 +360,7 @@ export default class Client<Bot extends IBot = IBot>
       new ReactionMessage(message.chat, reaction, message, {
         user: message.user,
         fromMe: message.fromMe,
+        extra: message.extra?.key ? { key: message.extra.key } : {},
       }),
     );
   }
@@ -328,6 +372,7 @@ export default class Client<Bot extends IBot = IBot>
       new ReactionMessage(message.chat, '', message, {
         user: message.user,
         fromMe: message.fromMe,
+        extra: message.extra?.key ? { key: message.extra.key } : {},
       }),
     );
   }
@@ -857,6 +902,158 @@ export default class Client<Bot extends IBot = IBot>
       this.bot.blockUser,
       User.apply(user, { clientId: this.id, botId: this.bot.id }),
     );
+  }
+
+  //! ************************* RECURSOS OPCIONAIS *************************
+
+  /** Retorna o método opcional do bot ou lança erro se a plataforma não suporta. */
+  private feature<K extends keyof IBot>(name: K): NonNullable<IBot[K]> {
+    const fn = (this.bot as IBot)[name];
+
+    if (typeof fn !== 'function') {
+      throw new Error(`O recurso "${String(name)}" não está disponível nesta plataforma.`);
+    }
+
+    return fn as unknown as NonNullable<IBot[K]>;
+  }
+
+  /** Verifica se a plataforma atual oferece um recurso opcional. */
+  public supports(name: keyof IBot): boolean {
+    return typeof this.bot[name] === 'function';
+  }
+
+  private linkChat(chat: Chat | string) {
+    return Chat.apply(chat, { clientId: this.id, botId: this.bot.id });
+  }
+
+  private linkUser(user: User | string) {
+    return User.apply(user, { clientId: this.id, botId: this.bot.id });
+  }
+
+  /**
+   * ID único de um usuário ou chat.
+   * No WhatsApp: número (`...@s.whatsapp.net`) quando conhecido, senão o LID (`...@lid`).
+   */
+  public async resolveId(id: User | Chat | string): Promise<string> {
+    const value = typeof id == 'string' ? id : id?.id || '';
+
+    if (!this.supports('resolveId')) return value;
+
+    return this.funcHandler.exec('user', this.feature('resolveId'), value);
+  }
+
+  /** Todos os identificadores conhecidos de um usuário (ID único, número e LID). */
+  public async getUserIdentity(user: User | string) {
+    const value = typeof user == 'string' ? user : user?.id || '';
+
+    if (!this.supports('getIdentity')) {
+      return { id: value, phoneNumber: '', pn: undefined, lid: undefined };
+    }
+
+    return this.funcHandler.exec('user', this.feature('getIdentity'), value);
+  }
+
+  /** Só administradores podem enviar mensagens (`true`) ou todos podem (`false`). */
+  public setChatAnnounce(chat: Chat | string, enabled: boolean): Promise<void> {
+    return this.funcHandler.exec('chat', this.feature('setChatAnnounce'), this.linkChat(chat), enabled);
+  }
+
+  /** Só administradores podem editar nome, descrição e foto (`true`). */
+  public setChatLocked(chat: Chat | string, enabled: boolean): Promise<void> {
+    return this.funcHandler.exec('chat', this.feature('setChatLocked'), this.linkChat(chat), enabled);
+  }
+
+  /** Mensagens temporárias em segundos (0 desativa). */
+  public setChatEphemeral(chat: Chat | string, seconds: number): Promise<void> {
+    return this.funcHandler.exec('chat', this.feature('setChatEphemeral'), this.linkChat(chat), seconds);
+  }
+
+  /** Qualquer membro pode adicionar participantes (`true`) ou só administradores (`false`). */
+  public setChatMemberAddMode(chat: Chat | string, allMembers: boolean): Promise<void> {
+    return this.funcHandler.exec('chat', this.feature('setChatMemberAddMode'), this.linkChat(chat), allMembers);
+  }
+
+  /** A entrada no grupo exige aprovação de um administrador (`true`). */
+  public setChatJoinApproval(chat: Chat | string, enabled: boolean): Promise<void> {
+    return this.funcHandler.exec('chat', this.feature('setChatJoinApproval'), this.linkChat(chat), enabled);
+  }
+
+  /** Pedidos de entrada pendentes no grupo. */
+  public async getChatJoinRequests(chat: Chat | string) {
+    const requests = await this.funcHandler.exec('chat', this.feature('getChatJoinRequests'), this.linkChat(chat));
+
+    return (requests || []).map((request) => ({ ...request, user: this.linkUser(request.user) }));
+  }
+
+  /** Aprova pedidos de entrada. Retorna os IDs aprovados. */
+  public approveChatJoinRequests(chat: Chat | string, users: (User | string)[]): Promise<string[]> {
+    return this.funcHandler.exec(
+      'chat',
+      this.feature('updateChatJoinRequests'),
+      this.linkChat(chat),
+      users.map((user) => this.linkUser(user)),
+      'approve',
+    );
+  }
+
+  /** Recusa pedidos de entrada. Retorna os IDs recusados. */
+  public rejectChatJoinRequests(chat: Chat | string, users: (User | string)[]): Promise<string[]> {
+    return this.funcHandler.exec(
+      'chat',
+      this.feature('updateChatJoinRequests'),
+      this.linkChat(chat),
+      users.map((user) => this.linkUser(user)),
+      'reject',
+    );
+  }
+
+  /** Dados de um grupo a partir do código ou link de convite, sem entrar nele. */
+  public async getChatInviteInfo(code: string): Promise<Chat | null> {
+    const chat = await this.funcHandler.exec('chat', this.feature('getChatInviteInfo'), code);
+
+    return chat ? this.linkChat(chat) : null;
+  }
+
+  /**
+   * Fixa uma mensagem no chat.
+   * @param duration - Segundos: 86400 (24 h), 604800 (7 dias) ou 2592000 (30 dias). Use 0 para desafixar.
+   */
+  public pinMessage(message: Message, duration: number = 604800): Promise<void> {
+    return this.funcHandler.exec('message', this.feature('pinMessage'), message, duration);
+  }
+
+  /** Desafixa uma mensagem. */
+  public unpinMessage(message: Message): Promise<void> {
+    return this.funcHandler.exec('message', this.feature('pinMessage'), message, 0);
+  }
+
+  /** Marca (`true`) ou desmarca (`false`) uma mensagem com estrela. */
+  public starMessage(message: Message, star: boolean = true): Promise<void> {
+    return this.funcHandler.exec('message', this.feature('starMessage'), message, star);
+  }
+
+  /** Encaminha uma mensagem para outro chat. */
+  public async forwardMessage(chat: Chat | string, message: Message): Promise<Message> {
+    const sent = await this.funcHandler.exec('sendMessage', this.feature('forwardMessage'), this.linkChat(chat), message);
+
+    return Message.apply(sent, { clientId: this.id, botId: this.bot.id });
+  }
+
+  /** Passa a receber o evento `presence` (digitando, gravando, online) deste chat. */
+  public subscribePresence(chat: Chat | string): Promise<void> {
+    return this.funcHandler.exec('chat', this.feature('subscribePresence'), this.linkChat(chat));
+  }
+
+  /** IDs dos usuários bloqueados. */
+  public getBlockedUsers(): Promise<string[]> {
+    return this.funcHandler.exec('user', this.feature('getBlockedUsers'));
+  }
+
+  /** Verifica se um número ou ID existe no WhatsApp. */
+  public isOnWhatsApp(id: User | string): Promise<{ exists: boolean; id: string }> {
+    const value = typeof id == 'string' ? id : id?.id || '';
+
+    return this.funcHandler.exec('user', this.feature('onExists'), value);
   }
 
   public static getClients(): Record<string, Client<IBot>> {

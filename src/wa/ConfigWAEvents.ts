@@ -1,8 +1,8 @@
 import {
   DisconnectReason,
+  GroupMetadata,
   MessageUpsertType,
   WACallEvent,
-  isJidGroup,
   getContentType,
   normalizeMessageContent,
   proto,
@@ -11,13 +11,36 @@ import { Boom } from '@hapi/boom';
 import Long from 'long';
 
 import { BotStatus } from '../bot/BotStatus';
-import { fixID, getPhoneNumber } from './ID';
+import type { GroupUpdateChanges, PresenceStatus } from '../bot/BotEventTypes';
+import { getPhoneNumber, isGroupJid, isUserJid, normalizeJid } from './ID';
 import Call, { CallStatus } from '../models/Call';
 
 import Chat from '../modules/chat/Chat';
+import User from '../modules/user/User';
+import ChatType from '../modules/chat/ChatType';
 import WhatsAppBot from './WhatsAppBot';
 import ConvertWAMessage from './ConvertWAMessage';
 import ErrorMessage from '../messages/ErrorMessage';
+
+/** Tipos de protocolo que não representam mensagens para o bot. */
+const IGNORED_PROTOCOL_TYPES = new Set<number>([
+  proto.Message.ProtocolMessage.Type.EPHEMERAL_SYNC_RESPONSE,
+  proto.Message.ProtocolMessage.Type.APP_STATE_SYNC_KEY_SHARE,
+  proto.Message.ProtocolMessage.Type.APP_STATE_SYNC_KEY_REQUEST,
+  proto.Message.ProtocolMessage.Type.APP_STATE_FATAL_EXCEPTION_NOTIFICATION,
+  proto.Message.ProtocolMessage.Type.EPHEMERAL_SETTING,
+  proto.Message.ProtocolMessage.Type.HISTORY_SYNC_NOTIFICATION,
+  proto.Message.ProtocolMessage.Type.INITIAL_SECURITY_NOTIFICATION_SETTING_SYNC,
+]);
+
+const CALL_STATUS: Record<string, CallStatus> = {
+  offer: CallStatus.Offer,
+  ringing: CallStatus.Ringing,
+  reject: CallStatus.Reject,
+  accept: CallStatus.Accept,
+  timeout: CallStatus.Timeout,
+  terminate: CallStatus.Terminate,
+};
 
 export default class ConfigWAEvents {
   public wa: WhatsAppBot;
@@ -28,91 +51,125 @@ export default class ConfigWAEvents {
 
   public configureAll() {
     this.configConnectionUpdate();
+    this.configLidMapping();
     this.configHistorySet();
     this.configContactsUpsert();
     this.configContactsUpdate();
     this.configChatsDelete();
+    this.configGroupsUpsert();
     this.configGroupsUpdate();
+    this.configGroupParticipants();
+    this.configGroupJoinRequest();
     this.configMessagesUpsert();
     this.configMessagesUpdate();
+    this.configPresence();
+    this.configBlocklist();
     this.configCall();
-    this.configCBNotifications();
   }
 
-  public configCBNotifications() {
-    this.configCBNotificationRemove();
-    this.configCBNotificationAdd();
-    this.configCBNotificationPromote();
-    this.configCBNotificationDemote();
+  /** Cria um User com os IDs conhecidos (sem acessar o disco). */
+  private async toUser(id?: string | null): Promise<User | undefined> {
+    const userId = await this.wa.resolveId(id);
+    if (!userId) return undefined;
+
+    const stored = await this.wa.getUser(new User(userId));
+    if (stored) return stored;
+
+    return User.fromJSON({
+      id: userId,
+      phoneNumber: getPhoneNumber(userId),
+      lid: this.wa.lidMapper.getLID(userId),
+    });
   }
 
-  public configCBNotificationRemove() {
-    this.wa.sock.ws.on('CB:notification,,remove', async (data) => {
-      for (const content of data.content[0]?.content || []) {
-        try {
-          await this.wa.groupParticipantsUpdate(
-            content.attrs.jid == data.attrs.participant ? 'leave' : 'remove',
-            data.attrs.from,
-            content.attrs.jid,
-            data.attrs.participant,
-          );
-        } catch (err) {
-          this.wa.emit('error', err);
-        }
+  /** Cria um Chat de grupo com o nome em cache, sem acessar a rede. */
+  private async toGroupChat(id: string): Promise<Chat> {
+    const chatId = normalizeJid(id);
+    const stored = await this.wa.getChat(new Chat(chatId));
+    if (stored) return stored;
+
+    const metadata = this.wa.groupMetadataCache.get<GroupMetadata>(chatId);
+
+    return Chat.fromJSON({ id: chatId, type: ChatType.Group, name: metadata?.subject });
+  }
+
+  public configLidMapping() {
+    this.wa.sock.ev.on('lid-mapping.update', (mapping) => {
+      try {
+        this.wa.registerIdentity(mapping?.lid, mapping?.pn);
+      } catch (err) {
+        this.wa.emit('error', err);
       }
     });
   }
 
-  public configCBNotificationAdd() {
-    this.wa.sock.ws.on('CB:notification,,add', async (data) => {
-      for (const content of data.content[0]?.content || []) {
-        try {
-          if (!data.attrs.participant)
-            data.attrs.participant = content.attrs.jid;
+  public configGroupParticipants() {
+    this.wa.sock.ev.on('group-participants.update', async (update) => {
+      try {
+        const groupId = normalizeJid(update?.id);
+        if (!groupId || !isGroupJid(groupId)) return;
 
-          await this.wa.groupParticipantsUpdate(
-            content.attrs.jid == data.attrs.participant ? 'join' : 'add',
-            data.attrs.from,
-            content.attrs.jid,
-            data.attrs.participant,
-          );
-        } catch (err) {
-          this.wa.emit('error', err);
+        this.wa.registerIdentity(update.author, update.authorPn, true);
+        this.wa.registerParticipants(update.participants as any);
+        this.wa.applyParticipantsUpdate(groupId, (update.participants || []) as any, update.action);
+
+        if (update.action == 'modify') return;
+
+        const authorId = await this.wa.resolveId(update.authorPn || update.author);
+
+        for (const participant of update.participants || []) {
+          try {
+            const participantId = await this.wa.resolveId(participant.phoneNumber || participant.id);
+            if (!participantId) continue;
+
+            const isSelfAction = !authorId || authorId == participantId;
+
+            const action =
+              update.action == 'add'
+                ? isSelfAction ? 'join' : 'add'
+                : update.action == 'remove'
+                  ? isSelfAction ? 'leave' : 'remove'
+                  : update.action;
+
+            await this.wa.groupParticipantsUpdate(
+              action,
+              groupId,
+              participantId,
+              authorId || participantId,
+            );
+          } catch (err) {
+            this.wa.emit('error', err);
+          }
         }
+      } catch (err) {
+        this.wa.emit('error', err);
       }
     });
   }
 
-  public configCBNotificationPromote() {
-    this.wa.sock.ws.on('CB:notification,,promote', async (data) => {
-      for (const content of data.content[0]?.content || []) {
-        try {
-          await this.wa.groupParticipantsUpdate(
-            'promote',
-            data.attrs.from,
-            content.attrs.jid,
-            data.attrs.participant,
-          );
-        } catch (err) {
-          this.wa.emit('error', err);
-        }
-      }
-    });
-  }
+  public configGroupJoinRequest() {
+    this.wa.sock.ev.on('group.join-request', async (update) => {
+      try {
+        const groupId = normalizeJid(update?.id);
+        if (!groupId || !isGroupJid(groupId)) return;
 
-  public configCBNotificationDemote() {
-    this.wa.sock.ws.on('CB:notification,,demote', async (data) => {
-      for (const content of data.content[0]?.content || []) {
-        try {
-          await this.wa.groupParticipantsUpdate(
-            'demote',
-            data.attrs.from,
-            content.attrs.jid,
-            data.attrs.participant,
-          );
-        } catch (err) {
-          this.wa.emit('error', err);
-        }
+        this.wa.registerIdentity(update.participant, update.participantPn, true);
+        this.wa.registerIdentity(update.author, update.authorPn, true);
+
+        const user = await this.toUser(update.participantPn || update.participant);
+        if (!user) return;
+
+        const fromUser = await this.toUser(update.authorPn || update.author);
+
+        this.wa.emit('group-join-request', {
+          action: update.action,
+          method: update.method || undefined,
+          chat: await this.toGroupChat(groupId),
+          user,
+          fromUser: fromUser && fromUser.id != user.id ? fromUser : undefined,
+        });
+      } catch (err) {
+        this.wa.emit('error', err);
       }
     });
   }
@@ -124,8 +181,8 @@ export default class ConfigWAEvents {
     try {
       for (const message of messages || []) {
         try {
-          if (!message) return;
-          if (message.key.remoteJid == 'status@broadcast') return;
+          if (!message?.key) continue;
+          if (message.key.remoteJid == 'status@broadcast') continue;
 
           const normalizedContent = normalizeMessageContent(message.message);
           const incomingContentType = getContentType(normalizedContent);
@@ -152,7 +209,7 @@ export default class ConfigWAEvents {
                 proto.WebMessageInfo.StubType.CIPHERTEXT
               )
             ) {
-              return; // Not read other null messages
+              continue; // Not read other null messages
             }
 
             const msgRetryCount =
@@ -174,31 +231,15 @@ export default class ConfigWAEvents {
                   newMsgRetryCount &&
                   msgRetryCount != newMsgRetryCount
                 ) {
-                  return; // Not read duplicated failed message
+                  continue; // Not read duplicated failed message
                 }
               }
             }
           }
 
-          if (
-            message.message?.protocolMessage?.type ==
-            proto.Message.ProtocolMessage.Type.EPHEMERAL_SYNC_RESPONSE ||
-            message.message?.protocolMessage?.type ==
-            proto.Message.ProtocolMessage.Type.APP_STATE_SYNC_KEY_SHARE ||
-            message.message?.protocolMessage?.type ==
-            proto.Message.ProtocolMessage.Type.APP_STATE_SYNC_KEY_REQUEST ||
-            message.message?.protocolMessage?.type ==
-            proto.Message.ProtocolMessage.Type
-              .APP_STATE_FATAL_EXCEPTION_NOTIFICATION ||
-            message.message?.protocolMessage?.type ==
-            proto.Message.ProtocolMessage.Type.EPHEMERAL_SETTING ||
-            message.message?.protocolMessage?.type ==
-            proto.Message.ProtocolMessage.Type.HISTORY_SYNC_NOTIFICATION ||
-            message.message?.protocolMessage?.type ==
-            proto.Message.ProtocolMessage.Type
-              .INITIAL_SECURITY_NOTIFICATION_SETTING_SYNC
-          ) {
-            return; // Not read empty messages
+          const protocolType = message.message?.protocolMessage?.type;
+          if (protocolType != null && IGNORED_PROTOCOL_TYPES.has(protocolType)) {
+            continue; // Not read empty messages
           }
 
           if (this.wa.messagesCached.includes(message.key.id!)) {
@@ -208,14 +249,13 @@ export default class ConfigWAEvents {
                 pollCreationMessageId: incomingPollUpdate?.pollCreationMessageKey?.id,
               });
             }
-            return;
+            continue;
           }
 
           this.wa.addMessageCache(message.key.id!);
+          this.wa.cacheWAMessage(message as any);
 
-          const chatId = fixID(message.key.remoteJid || this.wa.id);
-
-          const chat = await this.wa.getChat(new Chat(chatId));
+          const msg = await new ConvertWAMessage(this.wa, message as any, type).get();
 
           let timestamp: number | undefined;
 
@@ -227,31 +267,22 @@ export default class ConfigWAEvents {
             }
           }
 
+          const chat = await this.wa.getChat(new Chat(msg.chat.id));
+          const pushName = message.pushName || message.verifiedBizName || undefined;
+
           await this.wa.updateChat({
-            id: chatId,
-            unreadCount: (chat?.unreadCount || 0) + 1,
+            id: msg.chat.id,
+            unreadCount: message.key.fromMe ? chat?.unreadCount : (chat?.unreadCount || 0) + 1,
             timestamp,
-            name:
-              message.key.id?.includes('@s') && !message.key.fromMe
-                ? message.pushName || message.verifiedBizName || undefined
-                : undefined,
+            name: !isGroupJid(msg.chat.id) && !message.key.fromMe ? pushName : undefined,
           });
 
-          const userId = fixID(
-            message.key.fromMe
-              ? this.wa.id
-              : message.key.participant ||
-              message.participant ||
-              message.key.remoteJid ||
-              '',
-          );
-
-          await this.wa.updateUser({
-            id: userId,
-            name: message.pushName || message.verifiedBizName || undefined,
-          });
-
-          const msg = await new ConvertWAMessage(this.wa, message as any, type).get();
+          if (isUserJid(msg.user.id)) {
+            await this.wa.updateUser({
+              id: msg.user.id,
+              name: message.key.fromMe ? undefined : pushName,
+            });
+          }
 
           if (isPollUpdate) {
             console.info('[Rompot poll] adapter emitted vote event', {
@@ -284,7 +315,7 @@ export default class ConfigWAEvents {
           this.wa.emit(
             'message',
             new ErrorMessage(
-              fixID(message?.key?.remoteJid || ''),
+              this.wa.canonicalId(message?.key?.remoteJid || ''),
               err && err instanceof Error
                 ? err
                 : new Error(JSON.stringify(err)),
@@ -312,11 +343,13 @@ export default class ConfigWAEvents {
       try {
         for (const message of messages || []) {
           try {
-            if (message.key.remoteJid == 'status@broadcast') return;
+            if (message.key.remoteJid == 'status@broadcast') continue;
 
-            await this.readMessages([{ key: message.key, ...message.update }]);
+            if (message.update?.message) {
+              await this.readMessages([{ key: message.key, ...message.update } as any]);
+            }
 
-            if (!message?.update?.status) return;
+            if (!message?.update?.status) continue;
 
             const msg = await new ConvertWAMessage(this.wa, message).get();
 
@@ -327,7 +360,7 @@ export default class ConfigWAEvents {
             this.wa.emit(
               'message',
               new ErrorMessage(
-                fixID(message?.key?.remoteJid || ''),
+                this.wa.canonicalId(message?.key?.remoteJid || ''),
                 err && err instanceof Error
                   ? err
                   : new Error(JSON.stringify(err)),
@@ -364,7 +397,8 @@ export default class ConfigWAEvents {
           this.wa.lastConnectionUpdateDate = uptime;
           this.wa.status = BotStatus.Online;
 
-          this.wa.id = fixID(this.wa.sock?.user?.id || '');
+          this.wa.id = normalizeJid(this.wa.sock?.user?.id || '');
+          this.wa.lid = normalizeJid((this.wa.sock?.user as any)?.lid || '');
           this.wa.phoneNumber = getPhoneNumber(this.wa.id);
           this.wa.name =
             this.wa.sock?.user?.name ||
@@ -372,6 +406,8 @@ export default class ConfigWAEvents {
             this.wa.sock?.user?.verifiedName ||
             '';
           this.wa.profileUrl = this.wa.sock?.user?.imgUrl || '';
+
+          if (this.wa.lid) this.wa.registerIdentity(this.wa.lid, this.wa.id);
 
           this.wa.readUser(
             { id: this.wa.id },
@@ -426,7 +462,12 @@ export default class ConfigWAEvents {
 
           this.wa.eventsIsStoped = false;
 
-          await this.wa.sock.groupFetchAllParticipating();
+          // Preenche o cache de grupos e aprende os pares LID ↔ PN de todos os participantes
+          const groups = await this.wa.sock.groupFetchAllParticipating();
+
+          for (const metadata of Object.values(groups || {})) {
+            this.wa.setGroupMetadata(metadata);
+          }
         }
 
         if (update.connection == 'close') {
@@ -442,6 +483,8 @@ export default class ConfigWAEvents {
             clearInterval(this.wa.checkConnectionInterval);
             this.wa.checkConnectionInterval = null;
           }
+
+          await this.wa.flushRecords();
 
           if (status === DisconnectReason.loggedOut) {
             this.wa.emit('stop', { isLogout: true });
@@ -464,21 +507,31 @@ export default class ConfigWAEvents {
     const ignoreChats: string[] = [];
 
     this.wa.sock.ev.on('messaging-history.set', async (update) => {
+      // Os pares LID ↔ PN e os contatos do histórico sempre ajudam a manter IDs únicos
+      for (const mapping of update?.lidPnMappings || []) {
+        this.wa.registerIdentity(mapping.lid, mapping.pn);
+      }
+
+      for (const contact of update?.contacts || []) {
+        this.wa.registerIdentity(contact.id, contact.phoneNumber);
+        this.wa.registerIdentity(contact.id, contact.lid);
+      }
+
       if (!this.wa.config.autoSyncHistory) return;
 
       for (const chat of update.chats || []) {
         try {
           if (!('unreadCount' in chat) || chat.isDefaultSubgroup === true) {
-            ignoreChats.push(chat.id);
+            ignoreChats.push(normalizeJid(chat.id));
 
             continue;
           }
 
-          const isGroup = isJidGroup(chat.id);
+          const isGroup = isGroupJid(chat.id);
 
           if (!('pinned' in chat) || isGroup) {
             if (!isGroup) {
-              ignoreChats.push(chat.id);
+              ignoreChats.push(normalizeJid(chat.id));
 
               continue;
             }
@@ -487,15 +540,15 @@ export default class ConfigWAEvents {
               !('endOfHistoryTransferType' in chat) &&
               !('isDefaultSubgroup' in chat)
             ) {
-              ignoreChats.push(chat.id);
+              ignoreChats.push(normalizeJid(chat.id));
 
               continue;
             }
           }
 
           if ((chat.participant?.length || 0) > 0) {
-            if (!chat.participant?.some((p) => p.userJid == this.wa.id)) {
-              ignoreChats.push(chat.id);
+            if (!chat.participant?.some((p) => this.wa.lidMapper.isSameUser(p.userJid, this.wa.id))) {
+              ignoreChats.push(normalizeJid(chat.id));
 
               continue;
             }
@@ -517,8 +570,10 @@ export default class ConfigWAEvents {
         try {
           if (!message?.message || message.key.remoteJid == 'status@broadcast')
             continue;
-          if (ignoreChats.includes(fixID(message.key.remoteJid || '')))
+          if (ignoreChats.includes(normalizeJid(message.key.remoteJid || '')))
             continue;
+
+          this.wa.cacheWAMessage(message);
 
           const msg = await new ConvertWAMessage(this.wa, message).get();
 
@@ -527,7 +582,7 @@ export default class ConfigWAEvents {
           this.wa.emit('message', msg);
         } catch (err) {
           const msg = new ErrorMessage(
-            fixID(message?.key?.remoteJid || ''),
+            this.wa.canonicalId(message?.key?.remoteJid || ''),
             err && err instanceof Error ? err : new Error(JSON.stringify(err)),
           );
 
@@ -539,35 +594,42 @@ export default class ConfigWAEvents {
     });
   }
 
-  public configContactsUpdate() {
-    this.wa.sock.ev.on('contacts.update', async (updates) => {
-      if (!this.wa.config.autoLoadContactInfo) return;
+  private async handleContacts(updates: Array<Partial<{ id: string; lid?: string; phoneNumber?: string }>>) {
+    for (const update of updates || []) {
+      try {
+        if (!update?.id) continue;
 
-      for (const update of updates) {
-        try {
-          if (isJidGroup(update.id)) {
-            await this.wa.readChat({ id: update.id }, update);
-          } else {
-            await this.wa.readUser({ id: update.id }, update);
-          }
-        } catch (err) {
-          this.wa.emit('error', err);
+        this.wa.registerIdentity(update.id, update.phoneNumber);
+        this.wa.registerIdentity(update.id, update.lid);
+
+        if (!this.wa.config.autoLoadContactInfo) continue;
+
+        if (isGroupJid(update.id)) {
+          await this.wa.readChat({ id: update.id }, update as any);
+        } else {
+          await this.wa.readUser({ id: update.phoneNumber || update.id }, update as any);
         }
+      } catch (err) {
+        this.wa.emit('error', err);
       }
-    });
+    }
+  }
+
+  public configContactsUpdate() {
+    this.wa.sock.ev.on('contacts.update', (updates) => this.handleContacts(updates as any));
   }
 
   public configContactsUpsert() {
-    this.wa.sock.ev.on('contacts.upsert', async (updates) => {
-      if (!this.wa.config.autoLoadContactInfo) return;
+    this.wa.sock.ev.on('contacts.upsert', (updates) => this.handleContacts(updates as any));
+  }
 
-      for (const update of updates) {
+  public configGroupsUpsert() {
+    this.wa.sock.ev.on('groups.upsert', async (groups) => {
+      for (const metadata of groups || []) {
         try {
-          if (isJidGroup(update.id)) {
-            await this.wa.readChat({ id: update.id }, update);
-          } else {
-            await this.wa.readUser({ id: update.id }, update);
-          }
+          this.wa.setGroupMetadata(metadata);
+
+          await this.wa.readChat({ id: metadata.id }, metadata, false);
         } catch (err) {
           this.wa.emit('error', err);
         }
@@ -577,18 +639,45 @@ export default class ConfigWAEvents {
 
   public configGroupsUpdate() {
     this.wa.sock.ev.on('groups.update', async (updates) => {
-      if (!this.wa.config.autoLoadGroupInfo) return;
-
       for (const update of updates) {
         try {
           if (!update?.id) continue;
 
-          const chat = await this.wa.getChat(new Chat(update.id));
+          const groupId = normalizeJid(update.id);
+          const cached = this.wa.groupMetadataCache.get<GroupMetadata>(groupId);
 
-          if (chat == null) {
-            await this.wa.readChat({ id: update.id }, update, true);
-          } else {
-            await this.wa.readChat({ id: update.id }, update, false);
+          if (cached) {
+            this.wa.setGroupMetadata({ ...cached, ...update, participants: cached.participants } as GroupMetadata);
+          }
+
+          const changes: GroupUpdateChanges = {};
+
+          if (update.subject !== undefined) changes.name = update.subject;
+          if (update.desc !== undefined) changes.description = update.desc;
+          if (update.announce !== undefined) changes.announce = !!update.announce;
+          if (update.restrict !== undefined) changes.restrict = !!update.restrict;
+          if (update.inviteCode !== undefined) changes.inviteCode = update.inviteCode;
+          if (update.memberAddMode !== undefined) changes.memberAddMode = !!update.memberAddMode;
+          if (update.joinApprovalMode !== undefined) changes.joinApprovalMode = !!update.joinApprovalMode;
+          if (update.ephemeralDuration !== undefined) changes.ephemeralDuration = Number(update.ephemeralDuration) || 0;
+
+          const stored = await this.wa.getChat(new Chat(groupId));
+
+          if (this.wa.config.autoLoadGroupInfo || stored) {
+            await this.wa.readChat({ id: groupId }, update, stored == null);
+          }
+
+          const actions = Object.keys(changes) as (keyof GroupUpdateChanges)[];
+
+          if (actions.length) {
+            this.wa.registerIdentity(update.author, update.authorPn, true);
+
+            this.wa.emit('group-update', {
+              action: actions[0],
+              changes,
+              chat: await this.toGroupChat(groupId),
+              fromUser: await this.toUser(update.authorPn || update.author),
+            });
           }
         } catch (err) {
           this.wa.emit('error', err);
@@ -609,40 +698,76 @@ export default class ConfigWAEvents {
     });
   }
 
+  public configPresence() {
+    this.wa.sock.ev.on('presence.update', async (update) => {
+      try {
+        const chatId = await this.wa.resolveId(update?.id);
+        if (!chatId) return;
+
+        const chat = isGroupJid(chatId)
+          ? await this.toGroupChat(chatId)
+          : (await this.wa.getChat(new Chat(chatId))) || new Chat(chatId);
+
+        for (const [participant, data] of Object.entries(update.presences || {})) {
+          const user = await this.toUser(participant);
+          if (!user || user.id == this.wa.id) continue;
+
+          this.wa.emit('presence', {
+            chat,
+            user,
+            status: (data?.lastKnownPresence || 'available') as PresenceStatus,
+            lastSeen: data?.lastSeen ? Number(data.lastSeen) * 1000 : undefined,
+          });
+        }
+      } catch (err) {
+        this.wa.emit('error', err);
+      }
+    });
+  }
+
+  public configBlocklist() {
+    const emitBlocklist = async (action: 'add' | 'remove' | 'set', list: string[]) => {
+      const users: string[] = [];
+
+      for (const id of list || []) {
+        const resolved = await this.wa.resolveId(id);
+        if (resolved) users.push(resolved);
+      }
+
+      this.wa.emit('blocklist', { action, users });
+    };
+
+    this.wa.sock.ev.on('blocklist.set', ({ blocklist }) => {
+      emitBlocklist('set', blocklist).catch((err) => this.wa.emit('error', err));
+    });
+
+    this.wa.sock.ev.on('blocklist.update', ({ blocklist, type }) => {
+      emitBlocklist(type, blocklist).catch((err) => this.wa.emit('error', err));
+    });
+  }
+
   public configCall() {
     this.wa.sock.ev.on('call', async (events: WACallEvent[]) => {
       for (const event of events || []) {
         try {
-          const chat = event.chatId || event.groupJid || event.from || '';
+          this.wa.registerIdentity(event.from, event.callerPn, true);
 
-          let status: CallStatus;
+          const userId = await this.wa.resolveId(event.callerPn || event.from);
+          const chatId = event.isGroup && event.groupJid
+            ? normalizeJid(event.groupJid)
+            : await this.wa.resolveId(event.callerPn || event.chatId || event.from);
 
-          switch (event.status) {
-            case 'offer':
-              status = CallStatus.Offer;
-              break;
-            case 'ringing':
-              status = CallStatus.Ringing;
-              break;
-            case 'reject':
-              status = CallStatus.Reject;
-              break;
-            case 'accept':
-              status = CallStatus.Accept;
-              break;
-            case 'timeout':
-              status = CallStatus.Timeout;
-              break;
-            default:
-              status = CallStatus.Ringing;
-              break;
-          }
+          const status = CALL_STATUS[event.status] || CallStatus.Ringing;
 
-          const call = new Call(event.id, chat, event.from, status, {
+          const user = (await this.toUser(userId)) || userId;
+
+          const call = new Call(event.id, chatId || userId, user, status, {
             date: event.date || new Date(),
             isVideo: !!event.isVideo,
             offline: !!event.offline,
             latencyMs: event.latencyMs || 1,
+            isGroup: !!event.isGroup,
+            extra: { from: event.from, chatId: event.chatId, groupJid: event.groupJid },
           });
 
           this.wa.emit('call', call);

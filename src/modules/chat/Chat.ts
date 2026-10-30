@@ -24,8 +24,10 @@ export default class Chat {
 
   /** Nome do chat */
   public name?: string;
-  /** Número de telefone */
+  /** Número de telefone (somente dígitos, conversas privadas) */
   public phoneNumber?: string;
+  /** [WhatsApp] LID da conversa privada (`...@lid`), quando conhecido */
+  public lid?: string;
   /** Descrição do chat */
   public description?: string;
   /** URL da imagem de perfil do chat */
@@ -249,8 +251,10 @@ export default class Chat {
 
     if (data.name) chat.name = data.name;
     if (data.phoneNumber) chat.phoneNumber = data.phoneNumber;
+    if (data.lid) chat.lid = data.lid;
     if (data.description) chat.description = data.description;
     if (data.profileUrl) chat.profileUrl = data.profileUrl;
+    if (data.unreadCount) chat.unreadCount = data.unreadCount;
     if (data.timestamp) chat.timestamp = data.timestamp;
 
     if (data.admins) chat.admins = data.admins;

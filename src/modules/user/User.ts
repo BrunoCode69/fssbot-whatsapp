@@ -18,8 +18,10 @@ export default class User {
 
   /** Nome salvado do usuário */
   public savedName?: string;
-  /** Número de telefone */
+  /** Número de telefone (somente dígitos). Vazio quando o WhatsApp não revela o número. */
   public phoneNumber?: string;
+  /** [WhatsApp] LID do usuário (`...@lid`), quando conhecido */
+  public lid?: string;
   /** Descrição do usuário */
   public description?: string;
   /** URL da imagem de perfil do usuário */
@@ -152,8 +154,9 @@ export default class User {
     if (data.id) user.id = data.id;
 
     if (data.name) user.name = data.name;
-    if (data.savedName) user.phoneNumber = data.phoneNumber;
+    if (data.savedName) user.savedName = data.savedName;
     if (data.phoneNumber) user.phoneNumber = data.phoneNumber;
+    if (data.lid) user.lid = data.lid;
     if (data.description) user.description = data.description;
     if (data.profileUrl) user.profileUrl = data.profileUrl;
 

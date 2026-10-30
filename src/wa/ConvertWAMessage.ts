@@ -1,4 +1,4 @@
-import { decryptPollVote, getContentType, getDevice, isJidGroup, MessageUpsertType, normalizeMessageContent, proto, WAMessage, WAMessageContent, WAMessageUpdate } from "baileys";
+import { decryptPollVote, getContentType, getDevice, MessageUpsertType, normalizeMessageContent, proto, WAMessage, WAMessageContent, WAMessageUpdate } from "baileys";
 import digestSync from "crypto-digest-sync";
 import Long from "long";
 
@@ -25,7 +25,7 @@ import ChatType from "../modules/chat/ChatType";
 import WhatsAppBot from "./WhatsAppBot";
 import User from "../modules/user/User";
 import Chat from "../modules/chat/Chat";
-import { fixID, getLIDFromMessage, getPhoneNumber } from "./ID";
+import { getPhoneNumber, isGroupJid, isUserJid, normalizeJid } from "./ID";
 import { extractInteractiveListSelection } from './list-selection';
 import { createReactionMessageData } from './reaction-message-data';
 import { getPollCreationContent, getPollCreatorJid, getPollVoterId, getPollVoteChange } from './poll-content';
@@ -115,42 +115,51 @@ export default class ConvertWAMessage {
         break;
     }
 
+    const key: any = waMessage.key || {};
+    const rawParticipant = key.participant || (waMessage as any).participant || undefined;
+
     this.message.isUnofficial = this.message.plataform == MessagePlataform.Unknown;
-    this.message.fromMe = !!this.waMessage.key.fromMe;
-    this.message.id = this.message.id || this.waMessage.key.id || "";
+    this.message.fromMe = !!key.fromMe;
+    this.message.id = this.message.id || key.id || "";
 
-    // Extrai LID/JID da mensagem usando o método do bot
-    const { id: chatId, lid: chatLid } = this.bot.extractAndMapLID(waMessage);
+    // Registra os pares PN ↔ LID que o WhatsApp enviou junto com a mensagem
+    this.bot.extractAndMapLID(waMessage);
 
-    this.message.chat = new Chat(fixID(chatId, chatLid));
-    this.message.chat.type = isJidGroup(this.message.chat.id) ? ChatType.Group : ChatType.PV;
+    // Chave original: usada para responder, reagir, apagar e marcar como lida sem alterar LID/PN
+    this.message.extra.key = {
+      remoteJid: key.remoteJid || undefined,
+      id: key.id || undefined,
+      fromMe: !!key.fromMe,
+      participant: rawParticipant,
+    };
+
+    // ID único do chat: grupo como veio; conversa privada pelo número quando conhecido
+    const chatId = await this.bot.resolveId(key.remoteJid || "");
+
+    this.message.chat = new Chat(chatId);
+    this.message.chat.type = isGroupJid(chatId) ? ChatType.Group : ChatType.PV;
+
+    if (this.message.chat.type == ChatType.PV) {
+      this.message.chat.phoneNumber = getPhoneNumber(chatId) || undefined;
+      this.message.chat.lid = this.bot.lidMapper.getLID(chatId) || undefined;
+    }
+
     this.message.status = ConvertWAMessage.convertMessageStatus(ConvertWAMessage.isMessageUpdate(waMessage) ? waMessage.update.status! : waMessage.status!);
 
-    // Para user, considera participant em grupos
-    let userId: string;
-    let userLid: string | undefined;
+    // ID único do autor: participant em grupos, remoteJid em conversa privada
+    const userId = key.fromMe ? this.bot.id : await this.bot.resolveId(rawParticipant || key.remoteJid || "");
 
-    if (waMessage.key.fromMe) {
-      userId = this.bot.id;
-    } else {
-      // Em grupos, participant pode ter LID
-      const participantId = waMessage.key.participant || waMessage.participant;
-      const participantAlt = waMessage.key.participantAlt;
-      const remoteJidAlt = waMessage.key.remoteJidAlt;
-      if (participantId) {
-        userLid = getLIDFromMessage({ participant: participantId }) || getLIDFromMessage({ participant: participantAlt });
-        userId = participantId;
-      } else {
-        userId = waMessage.key.remoteJid || '';
-        userLid = getLIDFromMessage({ participant: remoteJidAlt }) || undefined;
-      }
+    const user = new User(userId);
+
+    if (isUserJid(userId)) {
+      user.phoneNumber = getPhoneNumber(userId) || undefined;
+      user.lid = (key.fromMe ? this.bot.lid : this.bot.lidMapper.getLID(userId)) || undefined;
     }
 
-    const user = new User(fixID(userId, userLid || chatLid));
-    const mappedUserJid = this.bot.lidMapper.getJID(userLid || (userId.includes('@lid') ? userId : ''));
-    if (mappedUserJid) {
-      user.phoneNumber = getPhoneNumber(mappedUserJid);
+    if (!key.fromMe && (waMessage as any).pushName) {
+      user.name = (waMessage as any).pushName;
     }
+
     this.message.user = user;
   }
 
@@ -256,17 +265,23 @@ export default class ConvertWAMessage {
   public async convertContextMessage(context: proto.ContextInfo) {
     if (context.mentionedJid) {
       for (const jid of context.mentionedJid) {
-        this.message.mentions.push(jid);
+        const mentionId = await this.bot.resolveId(jid);
+
+        if (mentionId && !this.message.mentions.includes(mentionId)) {
+          this.message.mentions.push(mentionId);
+        }
       }
     }
 
     if (context.quotedMessage) {
-      const { id: quotedChatId, lid: quotedLid } = this.bot.extractAndMapLID(this.waMessage);
+      const remoteJid = context.remoteJid || this.waMessage.key?.remoteJid || "";
+      const quotedFromMe = !!context.participant && this.bot.canonicalId(context.participant) == this.bot.id;
 
-      const message = {
+      const message: WAMessage = {
         key: {
-          remoteJid: fixID(quotedChatId, quotedLid),
-          participant: context.participant,
+          remoteJid,
+          participant: isGroupJid(normalizeJid(remoteJid)) ? context.participant : undefined,
+          fromMe: quotedFromMe,
           id: context.stanzaId,
         },
         message: context.quotedMessage,
@@ -298,7 +313,9 @@ export default class ConvertWAMessage {
    */
   public async convertProtocolMessage(content: proto.Message["protocolMessage"]) {
     if (content?.type == 0) {
-      this.waMessage.key = { ...this.waMessage.key, ...content.key };
+      // A chave do protocolo vem da perspectiva de quem apagou: só o ID identifica a mensagem apagada
+      this.waMessage.key = { ...this.waMessage.key, id: content.key?.id || this.waMessage.key.id };
+      this.message.id = content.key?.id || this.message.id;
       this.message.isDeleted = true;
     } else if (content?.type == 14) {
       await this.convertEditedMessage(content);

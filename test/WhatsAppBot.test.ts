@@ -30,18 +30,20 @@ describe('WhatsApp LID handling', () => {
     expect(mapper.getJID('user:4@lid')).toBe('5511999999999@s.whatsapp.net');
   });
 
-  test('maps private LIDs and preserves their device suffix', () => {
+  test('maps private LIDs and drops the device suffix', () => {
     const mapper = new LIDMapper();
 
     const result = extractAndMapLID({
       key: {
-        remoteJid: 'user:4@lid',
-        remoteJidAlt: '5511999999999@s.whatsapp.net',
+        remoteJid: '123456:4@lid',
+        remoteJidAlt: '5511999999999:4@s.whatsapp.net',
       },
     }, mapper);
 
-    expect(result).toEqual({ id: 'user:4@lid', lid: 'user:4@lid' });
-    expect(fixID('user:4@lid')).toBe('user:4@lid');
+    expect(result).toEqual({ id: '123456@lid', lid: '123456@lid' });
+    expect(fixID('123456:4@lid')).toBe('123456@lid');
+    expect(mapper.getJID('123456:7@lid')).toBe('5511999999999@s.whatsapp.net');
+    expect(mapper.getLID('5511999999999@s.whatsapp.net')).toBe('123456@lid');
   });
 });
 
@@ -129,12 +131,12 @@ describe('WhatsApp incoming reaction conversion', () => {
   test('keeps reaction type and target message ID', () => {
     const data = createReactionMessageData(
       { type: 'text', chat: { id: '120@g.us' }, user: { id: '5511888888888@s.whatsapp.net' } },
-      { text: '👍', key: { id: 'target-message-id' } },
+      { text: 'ðŸ‘', key: { id: 'target-message-id' } },
     );
 
     expect(data).toMatchObject({
       type: 'reaction',
-      text: '👍',
+      text: 'ðŸ‘',
       id: 'target-message-id',
     });
   });

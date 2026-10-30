@@ -9,6 +9,8 @@ export enum CallStatus {
   Reject = 'reject',
   Accept = 'accept',
   Timeout = 'timeout',
+  /** A chamada foi encerrada */
+  Terminate = 'terminate',
 }
 
 export default class Call {
@@ -32,6 +34,10 @@ export default class Call {
   public offline: boolean = false;
   /** Latencia da chamada */
   public latencyMs: number = 0;
+  /** [WhatsApp] É uma chamada em grupo */
+  public isGroup: boolean = false;
+  /** Dados adicionais da plataforma (ex.: `from`, o JID original de quem ligou) */
+  public extra?: Record<string, any>;
 
   public constructor(
     id: string = '',
@@ -77,6 +83,8 @@ export default class Call {
     if (data.isVideo) this.isVideo = data.isVideo;
     if (data.offline) this.offline = data.offline;
     if (data.latencyMs) this.latencyMs = data.latencyMs;
+    if (data.isGroup) this.isGroup = data.isGroup;
+    if (data.extra) this.extra = { ...(this.extra || {}), ...data.extra };
   }
 
   public async reject() {

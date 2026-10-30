@@ -1,11 +1,7 @@
 import {
   generateWAMessage,
-  generateWAMessageContent,
-  generateWAMessageFromContent,
-  isJidGroup,
   MiscMessageGenerationOptions,
   proto,
-  jidNormalizedUser,
 } from 'baileys';
 
 import Message, { MessageStatus, MessageType } from '../messages/Message';
@@ -23,7 +19,7 @@ import PollMessage from '../messages/PollMessage';
 
 import { getWaSticker } from '../utils/Libs';
 
-import { fixID, getID, getPhoneNumber } from './ID';
+import { getID, getPhoneNumber, isGroupJid } from './ID';
 import { createReactionKey } from './reaction-key';
 import { createInteractiveListPayload } from './interactive-list-payload';
 import type WhatsAppBot from './WhatsAppBot';
@@ -45,21 +41,13 @@ export default class ConvertToWAMessage {
   }
 
   /**
-   * Normaliza um JID usando o método do WhatsAppBot
+   * Resolve um ID para o ID canônico usado no envio (PN quando conhecido, senão LID).
    */
-  private safeNormalizeJid(jid: string | undefined): string | undefined {
+  private async resolveJid(jid: string | undefined): Promise<string | undefined> {
     if (!jid || typeof jid !== 'string') return undefined;
 
     try {
-      if (jid.includes('@')) {
-        return jidNormalizedUser(jid);
-      }
-
-      if (/^\d+$/.test(jid)) {
-        return jidNormalizedUser(`${jid}@s.whatsapp.net`);
-      }
-
-      return undefined;
+      return (await this.bot.resolveId(jid)) || undefined;
     } catch (error) {
       this.bot.logger?.error?.('Error normalizing JID:', jid, error);
       return undefined;
@@ -73,51 +61,17 @@ export default class ConvertToWAMessage {
   public async refactory(message = this.message): Promise<this> {
     this.waMessage = await this.refactoryMessage(message);
 
-    // Normaliza o chatId e resolve para LID se disponível
-    let normalizedChatId = this.safeNormalizeJid(message.chat.id);
+    // Envia sempre para o ID canônico; o Baileys escolhe a sessão LID/PN internamente
+    const chatId = await this.resolveJid(message.chat.id);
 
-    // Tenta resolver para LID usando o mapper
-    if (normalizedChatId) {
-      const resolvedLid = this.bot.lidMapper.resolve(normalizedChatId);
-      if (resolvedLid && resolvedLid.includes('@lid')) {
-        normalizedChatId = resolvedLid;
-      }
-    }
-
-    if (!normalizedChatId) {
+    if (!chatId) {
       throw new Error(`Invalid chat ID: ${message.chat.id}`);
     }
-    this.chatId = normalizedChatId;
+
+    this.chatId = chatId;
 
     if (message.mention && !this.isMention) {
-      const { chatId, waMessage } = await new ConvertToWAMessage(
-        this.bot,
-        message.mention,
-        true,
-      ).refactory(message.mention);
-
-      const userJid = message.mention.user.id
-        ? this.safeNormalizeJid(message.mention.user.id) || fixID(this.bot.id)
-        : fixID(this.bot.id);
-
-      this.options.quoted = await generateWAMessage(
-        chatId || this.chatId,
-        waMessage,
-        {
-          userJid,
-          upload(): any {
-            return {};
-          },
-        },
-      );
-
-      this.options.quoted.key.fromMe = userJid == this.bot.id;
-      this.options.quoted.key.id =
-        message.mention.id || this.options.quoted.key.id;
-
-      if (this.chatId.includes('@g')) {
-        this.options.quoted.key.participant = userJid;
-      }
+      this.options.quoted = await this.createQuoted(message.mention);
     }
 
     if (MediaMessage.isValid(message))
@@ -125,13 +79,44 @@ export default class ConvertToWAMessage {
     if (LocationMessage.isValid(message))
       this.refactoryLocationMessage(message);
     if (ReactionMessage.isValid(message))
-      this.refactoryReactionMessage(message);
+      await this.refactoryReactionMessage(message);
     if (ContactMessage.isValid(message)) this.refactoryContactMessage(message);
     if (ButtonMessage.isValid(message)) this.refactoryButtonMessage(message);
     if (ListMessage.isValid(message)) await this.refactoryListMessage(message);
     if (PollMessage.isValid(message)) this.refactoryPollMessage(message);
 
     return this;
+  }
+
+  /**
+   * Monta a mensagem citada. Usa a mensagem original do cache quando existe
+   * (conteúdo e chave exatos); senão gera uma cópia a partir dos dados do Rompot.
+   */
+  public async createQuoted(mention: Message) {
+    const cached = this.bot.getCachedWAMessage(mention.extra?.key?.id || mention.id);
+    if (cached?.key?.id) return cached;
+
+    const { waMessage } = await new ConvertToWAMessage(this.bot, mention, true).refactory(mention);
+
+    const key = await this.bot.getMessageKey(mention);
+    const userJid = (await this.resolveJid(mention.user?.id)) || this.bot.id;
+
+    const quoted = await generateWAMessage(key?.remoteJid || this.chatId, waMessage, {
+      userJid,
+      upload(): any {
+        return {};
+      },
+    });
+
+    quoted.key.fromMe = key ? !!key.fromMe : userJid == this.bot.id;
+    quoted.key.id = mention.id || quoted.key.id;
+    quoted.key.remoteJid = key?.remoteJid || this.chatId;
+
+    if (isGroupJid(this.chatId) && !quoted.key.fromMe) {
+      quoted.key.participant = key?.participant || userJid;
+    }
+
+    return quoted;
   }
 
   /**
@@ -144,10 +129,10 @@ export default class ConvertToWAMessage {
 
     msg.text = message.text;
 
-    const normalizedChatId = this.safeNormalizeJid(message.chat.id);
-    const normalizedUserId = this.safeNormalizeJid(message.user.id);
+    const normalizedChatId = await this.resolveJid(message.chat.id);
+    const normalizedUserId = await this.resolveJid(message.user.id);
 
-    if (normalizedUserId && normalizedChatId && isJidGroup(normalizedChatId)) {
+    if (normalizedUserId && normalizedChatId && isGroupJid(normalizedChatId)) {
       msg.participant = normalizedUserId;
     }
 
@@ -155,14 +140,14 @@ export default class ConvertToWAMessage {
       msg.mentions = [];
 
       for (const jid of message.mentions) {
-        const normalizedJid = this.safeNormalizeJid(jid);
-        if (normalizedJid) {
+        const normalizedJid = await this.resolveJid(jid);
+        if (normalizedJid && !msg.mentions.includes(normalizedJid)) {
           msg.mentions.push(normalizedJid);
         }
       }
 
-      for (const mention of msg.text.split(/@(.*?)/)) {
-        const mentionNumber = `${getPhoneNumber(mention.split(/\s+/)[0])}`;
+      for (const mention of `${msg.text || ''}`.split(/@(.*?)/)) {
+        const mentionNumber = `${mention.split(/\s+/)[0] || ''}`.replace(/\D+/g, '');
 
         if (
           !mentionNumber ||
@@ -171,7 +156,7 @@ export default class ConvertToWAMessage {
         )
           continue;
 
-        const jid = this.safeNormalizeJid(getID(mentionNumber));
+        const jid = await this.resolveJid(getID(mentionNumber));
 
         if (!jid || msg.mentions.includes(jid)) continue;
 
@@ -183,17 +168,13 @@ export default class ConvertToWAMessage {
     if (message.id) msg.id = message.id;
 
     if (message.isEdited) {
-      const normalizedEditChatId = this.safeNormalizeJid(message.chat.id);
-      const normalizedEditUserId = this.safeNormalizeJid(message.user.id);
+      const key = await this.bot.getMessageKey(message);
 
       msg.edit = {
-        remoteJid: normalizedEditChatId || '',
+        remoteJid: key?.remoteJid || normalizedChatId || '',
         id: message.id || '',
-        fromMe: message.fromMe || normalizedEditUserId == this.bot.id,
-        participant:
-          normalizedEditChatId && isJidGroup(normalizedEditChatId)
-            ? normalizedEditUserId || this.bot.id
-            : undefined,
+        fromMe: key ? !!key.fromMe : message.fromMe || normalizedUserId == this.bot.id,
+        participant: key?.participant || undefined,
         toJSON: () => this,
       };
     }
@@ -290,10 +271,11 @@ export default class ConvertToWAMessage {
     };
 
     for (const user of message.contacts) {
-      const normalizedUserId = this.safeNormalizeJid(user.id);
+      const normalizedUserId = this.bot.canonicalId(user.id);
       if (!normalizedUserId) continue;
 
       const phoneNumber = getPhoneNumber(normalizedUserId);
+      if (!phoneNumber) continue;
       const displayName = user.name || message.text || user.id;
       const vcard =
         'BEGIN:VCARD\n' +
@@ -316,18 +298,28 @@ export default class ConvertToWAMessage {
    * * Refatora uma mensagem de reação
    * @param message
    */
-  public refactoryReactionMessage(message: ReactionMessage) {
-    const normalizedChatId = this.safeNormalizeJid(message.chat.id);
-    const normalizedUserId = this.safeNormalizeJid(message.user.id);
-    const normalizedBotId = this.safeNormalizeJid(this.bot.id);
-    const reactionKey = createReactionKey(
-      normalizedChatId || message.chat.id,
-      message.id,
-      message.fromMe,
-      normalizedUserId,
-      normalizedBotId,
-      !!normalizedChatId && isJidGroup(normalizedChatId),
-    );
+  public async refactoryReactionMessage(message: ReactionMessage) {
+    const rawKey = message.extra?.key;
+    const normalizedChatId = await this.resolveJid(message.chat.id);
+    const normalizedUserId = await this.resolveJid(message.user.id);
+    const normalizedBotId = this.bot.id;
+
+    // Com a chave original, a reação aponta exatamente para a mensagem recebida
+    const reactionKey = rawKey?.id && rawKey.id == message.id && rawKey.remoteJid
+      ? {
+          remoteJid: rawKey.remoteJid,
+          id: rawKey.id,
+          fromMe: !!rawKey.fromMe,
+          participant: rawKey.fromMe ? undefined : rawKey.participant || undefined,
+        }
+      : createReactionKey(
+          normalizedChatId || message.chat.id,
+          message.id,
+          message.fromMe,
+          normalizedUserId,
+          normalizedBotId,
+          !!normalizedChatId && isGroupJid(normalizedChatId),
+        );
 
     this.waMessage = {
       react: {

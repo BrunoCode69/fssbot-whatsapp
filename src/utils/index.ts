@@ -1,6 +1,7 @@
-import MessageHandler, { MessageHandlerConfig } from "./MessageHandler";
+import MessageHandler from "./MessageHandler";
 
-export { MessageHandler, MessageHandlerConfig };
+export { MessageHandler };
+export type { MessageHandlerConfig } from "./MessageHandler";
 
 export * from "./Generic";
 export * from "./Libs";
