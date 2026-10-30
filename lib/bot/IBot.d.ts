@@ -290,4 +290,48 @@ export default interface IBot extends BotEvents {
      * @param users Usuários
      */
     setUsers(users: User[]): Promise<void>;
+    /** ID canônico de um usuário ou chat (no WhatsApp: número quando conhecido, senão LID). */
+    resolveId?(id: string): Promise<string>;
+    /** Todos os identificadores conhecidos de um usuário. */
+    getIdentity?(id: string): Promise<{
+        id: string;
+        pn?: string;
+        lid?: string;
+        phoneNumber: string;
+    }>;
+    /** Só administradores podem enviar mensagens. */
+    setChatAnnounce?(chat: Chat, enabled: boolean): Promise<void>;
+    /** Só administradores podem editar os dados do grupo. */
+    setChatLocked?(chat: Chat, enabled: boolean): Promise<void>;
+    /** Mensagens temporárias (segundos, 0 desativa). */
+    setChatEphemeral?(chat: Chat, seconds: number): Promise<void>;
+    /** Qualquer membro pode adicionar participantes. */
+    setChatMemberAddMode?(chat: Chat, allMembers: boolean): Promise<void>;
+    /** A entrada no grupo exige aprovação. */
+    setChatJoinApproval?(chat: Chat, enabled: boolean): Promise<void>;
+    /** Pedidos de entrada pendentes. */
+    getChatJoinRequests?(chat: Chat): Promise<{
+        user: User;
+        requestedAt?: number;
+        method?: string;
+    }[]>;
+    /** Aprova ou recusa pedidos de entrada. */
+    updateChatJoinRequests?(chat: Chat, users: User[], action: 'approve' | 'reject'): Promise<string[]>;
+    /** Dados de um grupo pelo código de convite. */
+    getChatInviteInfo?(code: string): Promise<Chat | null>;
+    /** Fixa (duração em segundos) ou desafixa (0) uma mensagem. */
+    pinMessage?(message: Message, duration?: number): Promise<void>;
+    /** Marca ou desmarca uma mensagem com estrela. */
+    starMessage?(message: Message, star?: boolean): Promise<void>;
+    /** Encaminha uma mensagem. */
+    forwardMessage?(chat: Chat, message: Message): Promise<Message>;
+    /** Passa a receber eventos de presença do chat. */
+    subscribePresence?(chat: Chat): Promise<void>;
+    /** Usuários bloqueados. */
+    getBlockedUsers?(): Promise<string[]>;
+    /** Verifica se um número tem WhatsApp. */
+    onExists?(id: string): Promise<{
+        exists: boolean;
+        id: string;
+    }>;
 }

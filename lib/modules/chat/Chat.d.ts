@@ -14,8 +14,10 @@ export default class Chat {
     type: ChatType;
     /** Nome do chat */
     name?: string;
-    /** Número de telefone */
+    /** Número de telefone (somente dígitos, conversas privadas) */
     phoneNumber?: string;
+    /** [WhatsApp] LID da conversa privada (`...@lid`), quando conhecido */
+    lid?: string;
     /** Descrição do chat */
     description?: string;
     /** URL da imagem de perfil do chat */

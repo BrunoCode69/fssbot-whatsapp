@@ -5,7 +5,9 @@ export declare enum CallStatus {
     Ringing = "ringing",
     Reject = "reject",
     Accept = "accept",
-    Timeout = "timeout"
+    Timeout = "timeout",
+    /** A chamada foi encerrada */
+    Terminate = "terminate"
 }
 export default class Call {
     /** ID do bot associado */
@@ -28,6 +30,10 @@ export default class Call {
     offline: boolean;
     /** Latencia da chamada */
     latencyMs: number;
+    /** [WhatsApp] É uma chamada em grupo */
+    isGroup: boolean;
+    /** Dados adicionais da plataforma (ex.: `from`, o JID original de quem ligou) */
+    extra?: Record<string, any>;
     constructor(id?: string, chat?: Chat | string, user?: User | string, status?: CallStatus, options?: Partial<Call>);
     /**
      * Injeta dados para o objeto atual.

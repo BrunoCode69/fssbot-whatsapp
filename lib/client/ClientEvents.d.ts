@@ -8,6 +8,7 @@ import Call from '../models/Call';
 import User from '../modules/user/User';
 import Chat from '../modules/chat/Chat';
 import Message from '../messages/Message';
+import type { BlocklistEvent, GroupJoinRequestEvent, GroupUpdateEvent, IdMappingEvent, PresenceEvent } from '../bot/BotEventTypes';
 /**
  * Mapeia os eventos que podem ser emitidos pelo cliente.
  */
@@ -106,6 +107,16 @@ export declare type ClientEventsMap = {
     'call-rejected': Call;
     'call-accepted': Call;
     'call-ended': Call;
+    /** [WhatsApp] Configuração de um grupo alterada (nome, descrição, permissões...). */
+    'group-update': GroupUpdateEvent;
+    /** [WhatsApp] Pedido de entrada num grupo com aprovação. */
+    'group-join-request': GroupJoinRequestEvent;
+    /** [WhatsApp] Presença de um contato atualizada (requer `subscribePresence`). */
+    presence: PresenceEvent;
+    /** [WhatsApp] Lista de bloqueados alterada. */
+    blocklist: BlocklistEvent;
+    /** [WhatsApp] Um LID foi associado a um número de telefone. */
+    'id-mapping': IdMappingEvent;
     /**
      * Evento de erro ocorrido.
      */

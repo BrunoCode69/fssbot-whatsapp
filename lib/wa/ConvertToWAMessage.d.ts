@@ -19,14 +19,19 @@ export default class ConvertToWAMessage {
     isRelay: boolean;
     constructor(bot: WhatsAppBot, message: Message, isMention?: boolean);
     /**
-     * Normaliza um JID usando o método do WhatsAppBot
+     * Resolve um ID para o ID canônico usado no envio (PN quando conhecido, senão LID).
      */
-    private safeNormalizeJid;
+    private resolveJid;
     /**
      * * Refatora a mensagem
      * @param message
      */
     refactory(message?: Message): Promise<this>;
+    /**
+     * Monta a mensagem citada. Usa a mensagem original do cache quando existe
+     * (conteúdo e chave exatos); senão gera uma cópia a partir dos dados do Rompot.
+     */
+    createQuoted(mention: Message): Promise<import("baileys").WAMessage>;
     /**
      * * Refatora outras informações da mensagem
      * @param message
@@ -45,7 +50,7 @@ export default class ConvertToWAMessage {
      * * Refatora uma mensagem de reação
      * @param message
      */
-    refactoryReactionMessage(message: ReactionMessage): void;
+    refactoryReactionMessage(message: ReactionMessage): Promise<void>;
     /**
      * * Refatora uma mensagem de enquete
      * @param message

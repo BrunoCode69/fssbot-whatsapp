@@ -11,8 +11,10 @@ export default class User {
     name?: string;
     /** Nome salvado do usuário */
     savedName?: string;
-    /** Número de telefone */
+    /** Número de telefone (somente dígitos). Vazio quando o WhatsApp não revela o número. */
     phoneNumber?: string;
+    /** [WhatsApp] LID do usuário (`...@lid`), quando conhecido */
+    lid?: string;
     /** Descrição do usuário */
     description?: string;
     /** URL da imagem de perfil do usuário */
