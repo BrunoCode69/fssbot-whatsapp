@@ -221,7 +221,7 @@ describe('WhatsApp poll creation variants', () => {
         participant: '12345@lid',
         participantAlt: '5511999999999:4@s.whatsapp.net',
       },
-    }, 'bot@s.whatsapp.net')).toBe('5511999999999:4@s.whatsapp.net');
+    }, 'bot@s.whatsapp.net')).toBe('5511999999999@s.whatsapp.net');
   });
 
   test('matches Baileys author precedence when participant and remote JID alternates coexist', () => {
@@ -231,12 +231,12 @@ describe('WhatsApp poll creation variants', () => {
         remoteJidAlt: '5511999999999:4@s.whatsapp.net',
         participant: '46609488420874@lid',
       },
-    }, 'bot@s.whatsapp.net')).toBe('5511999999999:4@s.whatsapp.net');
+    }, 'bot@s.whatsapp.net')).toBe('5511999999999@s.whatsapp.net');
   });
 
-  test('preserves the raw poll creator device JID used by Baileys encryption', () => {
+  test('drops the device suffix from the poll creator, like Baileys getKeyAuthor', () => {
     expect(getPollCreatorJid({ key: { fromMe: true } }, '5511999999999:7@s.whatsapp.net'))
-      .toBe('5511999999999:7@s.whatsapp.net');
+      .toBe('5511999999999@s.whatsapp.net');
   });
 
   test('detects an added option when a voter switches their single-choice vote', () => {

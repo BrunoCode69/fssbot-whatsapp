@@ -28,7 +28,15 @@ import Chat from "../modules/chat/Chat";
 import { getPhoneNumber, isGroupJid, isUserJid, normalizeJid } from "./ID";
 import { extractInteractiveListSelection } from './list-selection';
 import { createReactionMessageData } from './reaction-message-data';
-import { getPollCreationContent, getPollCreatorJid, getPollVoterId, getPollVoteChange } from './poll-content';
+import {
+  decryptPollVoteWithCandidates,
+  getPollCreationContent,
+  getPollCreatorJid,
+  getPollJidCandidates,
+  getPollVoterId,
+  getPollVoteChange,
+  normalizePollJid,
+} from './poll-content';
 
 export default class ConvertWAMessage {
   public type?: MessageUpsertType;
@@ -461,10 +469,7 @@ export default class ConvertWAMessage {
       }
     }
 
-    pollMessage.extra.pollCreatorJid = getPollCreatorJid(
-      this.waMessage,
-      this.bot.sock.user?.id || this.bot.id,
-    );
+    pollMessage.extra.pollCreatorJid = getPollCreatorJid(this.waMessage, this.bot.id);
 
     this.message = pollMessage;
     console.info('[Rompot poll] creation converted', {
@@ -488,8 +493,24 @@ export default class ConvertWAMessage {
     pollUpdate.extra.pollCreationMessageId = pollMessageId;
 
     const userId = getPollVoterId(this.waMessage, this.bot.id);
-    const pollCreatorJid = pollCreation?.extra?.pollCreatorJid
-      || (pollCreation?.fromMe ? this.bot.sock.user?.id || this.bot.id : pollCreation?.user?.id || '');
+    const pollCreatorJid = normalizePollJid(
+      pollCreation?.extra?.pollCreatorJid
+      || (pollCreation?.fromMe ? this.bot.id : pollCreation?.user?.id || ''),
+    );
+
+    // Candidatos sem dispositivo, em PN e LID: em conversas no modo LID o celular pode usar o LID
+    const creatorIsBot = !!pollCreation?.fromMe || this.bot.lidMapper.isSameUser(pollCreatorJid, this.bot.id);
+    const creatorCandidates = getPollJidCandidates(
+      ...(creatorIsBot ? [this.bot.id, this.bot.lid] : []),
+      pollCreatorJid,
+      ...this.bot.lidMapper.aliases(pollCreatorJid),
+    );
+    const voterKey: any = this.waMessage.key || {};
+    const voterCandidates = getPollJidCandidates(
+      userId,
+      voterKey.participant || (this.waMessage as any).participant || voterKey.remoteJid,
+      ...this.bot.lidMapper.aliases(userId),
+    );
 
     console.info('[Rompot poll] vote update received', {
       eventMessageId: this.waMessage.key.id,
@@ -505,17 +526,31 @@ export default class ConvertWAMessage {
     if (pollCreation) {
       let poll: proto.Message.IPollVoteMessage;
       try {
-        poll = decryptPollVote(content.vote!, {
-          pollCreatorJid,
-          pollMsgId: content?.pollCreationMessageKey?.id || "",
-          pollEncKey: pollCreation.secretKey,
-          voterJid: userId,
-        });
+        const result = decryptPollVoteWithCandidates(
+          (creatorJid, voterJid) => decryptPollVote(content.vote!, {
+            pollCreatorJid: creatorJid,
+            pollMsgId: content?.pollCreationMessageKey?.id || "",
+            pollEncKey: pollCreation.secretKey,
+            voterJid,
+          }),
+          creatorCandidates,
+          voterCandidates,
+        );
+
+        poll = result.vote;
+
+        if (result.creatorJid != creatorCandidates[0] || result.voterJid != voterCandidates[0]) {
+          console.info('[Rompot poll] vote decrypted with alternate identity', {
+            pollMessageId,
+            creatorJid: result.creatorJid,
+            voterJid: result.voterJid,
+          });
+        }
       } catch (error) {
         console.error('[Rompot poll] vote decryption failed', {
           pollMessageId,
-          pollCreatorJid,
-          voterId: userId,
+          creatorCandidates,
+          voterCandidates,
           secretKeyLength: pollCreation.secretKey?.length || 0,
           error: error instanceof Error ? error.message : String(error),
         });
