@@ -484,6 +484,88 @@ client.demoteUserInChat(chat, user);
 client.rejectCall(call);
 ```
 
+## IDs no WhatsApp (PN e LID)
+
+O WhatsApp identifica a mesma pessoa de duas formas: pelo número (`5511999999999@s.whatsapp.net`, chamado PN) e pelo LID (`123456789@lid`), um ID que esconde o número. A partir do Baileys 7 as mensagens podem chegar com qualquer um dos dois.
+
+O Rompot entrega **um único ID por pessoa** em `message.user.id`, `message.chat.id` (conversas privadas), `message.mentions`, eventos de grupo e chamadas:
+
+- o PN, sempre que o número é conhecido;
+- o LID, só quando o WhatsApp não revela o número (por exemplo, grupos com número oculto).
+
+Os pares PN ↔ LID ficam salvos pelo Baileys na sessão (`lid-mapping-*`), então o ID continua o mesmo depois de reiniciar. Quando o Rompot descobre o número de alguém que só era conhecido pelo LID, os dados salvos com o LID são movidos para o PN e o evento `id-mapping` é emitido.
+
+```ts
+message.user.id; // "5511999999999@s.whatsapp.net"
+message.user.phoneNumber; // "5511999999999" (vazio quando o número é oculto)
+message.user.lid; // "123456789@lid" (quando conhecido)
+
+await client.resolveId("123456789@lid"); // "5511999999999@s.whatsapp.net"
+await client.getUserIdentity("5511999999999"); // { id, pn, lid, phoneNumber }
+
+client.on("id-mapping", ({ lid, pn }) => {
+  // migre aqui dados que você guardou com o LID
+});
+```
+
+Qualquer método aceita número puro, PN ou LID, com ou sem sufixo de dispositivo.
+
+## Recursos do WhatsApp (Baileys 7)
+
+```ts
+// Grupo
+await client.setChatAnnounce(chat, true); // só admins enviam mensagens
+await client.setChatLocked(chat, true); // só admins editam nome, descrição e foto
+await client.setChatEphemeral(chat, 604800); // mensagens temporárias (0 desativa)
+await client.setChatMemberAddMode(chat, false); // só admins adicionam membros
+await client.setChatJoinApproval(chat, true); // entrada exige aprovação
+await client.getChatJoinRequests(chat); // [{ user, requestedAt, method }]
+await client.approveChatJoinRequests(chat, ["5511999999999"]);
+await client.rejectChatJoinRequests(chat, ["5511999999999"]);
+await client.getChatInviteInfo("https://chat.whatsapp.com/CODIGO");
+
+// Mensagem
+await client.pinMessage(message, 86400); // 86400, 604800 ou 2592000 segundos
+await client.unpinMessage(message);
+await client.starMessage(message, true);
+await client.forwardMessage("5511999999999", message);
+
+// Usuários e presença
+await client.isOnWhatsApp("5511999999999"); // { exists, id }
+await client.getBlockedUsers();
+await client.subscribePresence(chat); // passa a emitir "presence"
+
+// Use client.supports("pinMessage") para saber se a plataforma atual oferece o recurso.
+```
+
+### Eventos novos
+
+```ts
+client.on("group-update", ({ action, changes, chat, fromUser }) => {
+  // action: name | description | announce | restrict | inviteCode | memberAddMode | joinApprovalMode | ephemeralDuration
+});
+
+client.on("group-join-request", ({ action, method, chat, user, fromUser }) => {
+  // action: created | revoked | rejected
+});
+
+client.on("presence", ({ chat, user, status, lastSeen }) => {
+  // status: available | unavailable | composing | recording | paused
+});
+
+client.on("blocklist", ({ action, users }) => {});
+client.on("id-mapping", ({ lid, pn, phoneNumber }) => {});
+client.on("call-ended", (call) => {}); // também emitido quando a chamada é encerrada (terminate)
+```
+
+### Desempenho
+
+- Metadados de grupo ficam em cache (`groupMetadataCacheTTL`, padrão 5 min) e são atualizados pelos eventos de participantes, sem consultar o WhatsApp a cada envio.
+- Mensagens recentes ficam em cache por ID (`messageCacheTTL`, padrão 30 min) para reenvio, votos de enquete, citação e encaminhamento.
+- Registros de chats e usuários ficam em memória e são gravados no disco em lote.
+- A versão do WhatsApp Web é buscada ao conectar (`autoFetchLatestVersion`, padrão `true`).
+- O histórico completo só é pedido com `autoSyncHistory: true`.
+
 ## 📄 Licença
 
 Este projeto está sob a licença MIT - veja o arquivo [LICENSE](https://github.com/Laxeder/rompot/blob/main/LICENSE) para mais detalhes.

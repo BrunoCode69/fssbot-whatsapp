@@ -30,6 +30,8 @@ export declare class LIDMapper {
     private pnToLid;
     private store?;
     private listeners;
+    private pendingPersist;
+    private persistTimer?;
     /**
      * Conecta o mapper ao store persistente do Baileys.
      * @param store - `sock.signalRepository.lidMapping`
@@ -92,5 +94,7 @@ export declare class LIDMapper {
         lidToJidCount: number;
         jidToLidCount: number;
     };
+    /** Agrupa os pares a persistir numa única gravação no store do Baileys. */
+    private queuePersist;
     private trim;
 }

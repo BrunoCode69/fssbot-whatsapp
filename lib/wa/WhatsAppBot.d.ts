@@ -91,6 +91,7 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     private pendingRecordWrites;
     /** Chaves de registros antigos salvos com LID, carregadas sob demanda para migração */
     private legacyLidRecords?;
+    private legacyLidRecordsLoading?;
     private userConfig;
     constructor(config?: Partial<WhatsAppBotConfig>);
     /**

@@ -33,6 +33,8 @@ export class LIDMapper {
   private pnToLid = new Map<string, string>();
   private store?: LIDMappingStoreLike;
   private listeners = new Set<LIDMappingListener>();
+  private pendingPersist: LIDPNPair[] = [];
+  private persistTimer?: NodeJS.Timeout;
 
   /**
    * Conecta o mapper ao store persistente do Baileys.
@@ -81,9 +83,7 @@ export class LIDMapper {
     this.pnToLid.set(pn, lid);
     this.trim();
 
-    if (persist && this.store) {
-      this.store.storeLIDPNMappings([{ lid, pn }]).catch(() => undefined);
-    }
+    if (persist && this.store) this.queuePersist({ lid, pn });
 
     for (const listener of this.listeners) {
       try {
@@ -257,6 +257,25 @@ export class LIDMapper {
       lidToJidCount: this.lidToPn.size,
       jidToLidCount: this.pnToLid.size,
     };
+  }
+
+  /** Agrupa os pares a persistir numa única gravação no store do Baileys. */
+  private queuePersist(pair: LIDPNPair): void {
+    this.pendingPersist.push(pair);
+
+    if (this.persistTimer) return;
+
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = undefined;
+
+      const pairs = this.pendingPersist.splice(0, this.pendingPersist.length);
+
+      if (pairs.length && this.store) {
+        this.store.storeLIDPNMappings(pairs).catch(() => undefined);
+      }
+    }, 500);
+
+    this.persistTimer.unref?.();
   }
 
   private trim(): void {

@@ -155,6 +155,7 @@ export default class WhatsAppBot extends BotEvents implements IBot {
   private pendingRecordWrites = new Map<string, NodeJS.Timeout>();
   /** Chaves de registros antigos salvos com LID, carregadas sob demanda para migração */
   private legacyLidRecords?: Set<string>;
+  private legacyLidRecordsLoading?: Promise<Set<string>>;
   private userConfig: Partial<WhatsAppBotConfig>;
 
   constructor(config?: Partial<WhatsAppBotConfig>) {
@@ -320,13 +321,17 @@ export default class WhatsAppBot extends BotEvents implements IBot {
    */
   private async migrateLegacyRecords({ lid, pn }: LIDPNPair) {
     if (!this.legacyLidRecords) {
-      const keys = [
-        ...(await this.auth.listAll('users-')),
-        ...(await this.auth.listAll('chats-')),
-      ];
+      // Uma única leitura do diretório, compartilhada por todas as migrações simultâneas
+      this.legacyLidRecordsLoading =
+        this.legacyLidRecordsLoading ||
+        Promise.all([this.auth.listAll('users-'), this.auth.listAll('chats-')]).then(
+          ([users, chats]) => new Set([...users, ...chats].filter((key) => key.endsWith('@lid'))),
+        );
 
-      this.legacyLidRecords = new Set(keys.filter((key) => key.endsWith('@lid')));
+      this.legacyLidRecords = await this.legacyLidRecordsLoading;
     }
+
+    if (!this.legacyLidRecords.size) return;
 
     for (const prefix of ['users', 'chats']) {
       const legacyKey = `${prefix}-${lid}`;
