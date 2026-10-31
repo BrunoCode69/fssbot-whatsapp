@@ -258,7 +258,8 @@ export default class ConvertWAMessage {
     const content = messageContent![contentType] as any;
 
     this.message.text = this.message.text || content.text || content.caption || content.buttonText || content.hydratedTemplate?.hydratedContentText || content.displayName || content.contentText || "";
-    this.message.selected = content?.singleSelectReply?.selectedRowId || content?.selectedId || "";
+    // Preserva a opção já definida pela conversão específica (voto de enquete, resposta de lista interativa)
+    this.message.selected = this.message.selected || content?.singleSelectReply?.selectedRowId || content?.selectedId || "";
 
     if (content.contextInfo) {
       await this.convertContextMessage(content.contextInfo as proto.ContextInfo);
