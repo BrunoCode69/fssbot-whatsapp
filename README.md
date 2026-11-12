@@ -1,571 +1,413 @@
-# Rompot
+# Rompot (fssbot-whatsapp)
 
-Uma biblioteca para desenvolvimento de ChatBot multi-plataforma em JavaScript/TypeScript
+Biblioteca moderna para desenvolvimento de ChatBots multi-plataforma em JavaScript/TypeScript, com suporte completo a **WhatsApp** (motorizado por [**ZapoJS**](https://zapo.to/) com persistência em **SQLite**) e **Telegram**.
+
+---
 
 ## 🛠 Recursos
 
-- [x] Simples uso
-- [x] Criação de comandos
-- [x] Resposta rápida
-- [x] Tratamento de solicitações
-- [x] Tratamento de conexão
-- [x] Alta personalização
-- [x] Suporte a Cluster (Beta)
+- [x] Motor WhatsApp de alta performance com **ZapoJS 1.11+**
+- [x] Armazenamento unificado e eficiente em **SQLite** (`@zapo-js/store-sqlite`)
+- [x] Suporte nativo a **Botões Interativos** (Quick Reply) e **Listas** (Single Select)
+- [x] Descriptografia automática de **votos de enquetes**, **reações** e **edições** via `message_addon`
+- [x] Resolução canônica de identidades **PN ↔ LID** com persistência no SQLite
+- [x] Acesso direto ao cliente nativo tipado via `bot.native` (`WaClient`)
+- [x] Módulo **Telegram** integrado
+- [x] Sistema de comandos e mensagens estruturadas
 
-| Plataformas            | Whatsapp | Telegram (Beta) |
-| ----------------------- | -------- | --------------- |
-| Recebimento de mensagem | ✅       | ✅              |
-| Envio de texto          | ✅       | ✅              |
-| Envio de mídia          | ✅       | ✅              |
-| Envio de stickers       | ✅       | ✅              |
-| Envio de lista          | ❌       | ❌              |
-| Envio de botão          | ❌       | ❌              |
-| Envio de enquete        | ✅       | ✅              |
-| Criação de chats        | ✅       | 🔧              |
-| Histórico de mensagens  | ✅       | ❌              |
+| Recursos | WhatsApp (ZapoJS + SQLite) | Telegram |
+| :--- | :---: | :---: |
+| Recebimento de mensagens | ✅ | ✅ |
+| Envio de texto e menções | ✅ | ✅ |
+| Envio de mídias (imagem, vídeo, áudio/PTT, arquivos) | ✅ | ✅ |
+| Envio de figurinhas / stickers com metadados | ✅ | ✅ |
+| Envio de botões interativos (Quick Reply) | ✅ | ✅ (Inline Keyboard) |
+| Envio de listas interativas (Single Select) | ✅ | ❌ |
+| Envio de enquetes (Polls) e captura de votos | ✅ | ✅ |
+| Reações em mensagens | ✅ | ❌ |
+| Fixação e desafixação de mensagens (Pin) | ✅ | ✅ |
+| Edição de mensagens | ✅ | ✅ |
+| Gestão de grupos (membros, permissões, convites, aprovações) | ✅ | ✅ |
+| Canais / Newsletters | ✅ (`bot.native.newsletter`) | 🔧 |
 
-### 🔧 Instalação
+---
 
-Instalando pacote
+## 📦 Instalação
 
-```sh
-npm i rompot
+```bash
+# Com npm
+npm install rompot zapo-js @zapo-js/store-sqlite
+
+# Com bun
+bun add rompot zapo-js @zapo-js/store-sqlite
 ```
 
-Importando pacote
+Importação:
 
 ```ts
 // TypeScript
-import Client, { WhatsAppBot, TelegramBot } from "rompot";
+import Client, { WhatsAppBot, SqliteAuthState, MultiFileAuthState, TelegramBot } from "rompot";
 
-// Javascript
-const { Client, WhatsAppBot, TelegramBot } = require("rompot");
+// JavaScript
+const { Client, WhatsAppBot, SqliteAuthState, MultiFileAuthState, TelegramBot } = require("rompot");
 ```
 
-## WhatsApp
+---
 
-Após iniciar o bot um QR Code será emprimido no terminal, escane-o com seu WhatsApp para gerar uma nova conexão entre seu número e o Client. Essa conexão será guardada em `./path-to-auth`, para gerar uma nova delete-o ou se conecte com um novo caminho de sessão.
+## 🚀 WhatsApp
+
+### Conexão via QR Code
+
+Por padrão, a sessão é salva em um banco SQLite (`session.sqlite`). Na primeira conexão, o evento `qr` emitirá a string para você exibir no terminal ou gerar a imagem:
 
 ```ts
-const client = new Client(new WhatsAppBot());
-client.connect("./path-to-auth");
+import Client, { WhatsAppBot, SqliteAuthState } from "rompot";
+
+const bot = new WhatsAppBot();
+const client = new Client(bot);
 
 client.on("qr", (qr) => {
-  console.log("Scan QR:", qr);
+  console.log("Escaneie o QR Code:", qr);
 });
+
+client.on("open", () => {
+  console.log("WhatsApp conectado com sucesso!");
+});
+
+// Salva em ./sessions/session.sqlite
+const auth = new SqliteAuthState("./sessions");
+await client.connect(auth);
 ```
 
-## Parear código
+### Conexão via Código de Pareamento (Phone Number)
 
-Necessita passar um método de autenticação personalizado incluindo o número do bot a ser conectado.
+Para conectar sem câmera usando o código de 8 dígitos enviado pelo WhatsApp:
 
 ```ts
-import Client, { WhatsAppBot, MultiFileAuthState } from "rompot";
+import Client, { WhatsAppBot, SqliteAuthState } from "rompot";
 
-const client = new Client(new WhatsAppBot());
+const bot = new WhatsAppBot();
+const client = new Client(bot);
 
 client.on("code", (code) => {
-  console.info("Código de pareamento gerado:", code);
+  console.info(`Digite este código no seu celular: ${code}`);
 });
 
+// Informe o número em formato internacional (apenas dígitos)
 const botPhoneNumber = "5511991234567";
-
-const auth = new MultiFileAuthState("./path-to-auth", botPhoneNumber));
+const auth = new SqliteAuthState("./sessions", botPhoneNumber);
 
 await client.connect(auth);
 ```
 
-## Telegram (Beta)
+> **Nota de Compatibilidade:** Se seu código usa `MultiFileAuthState("./sessions", botPhoneNumber)`, ele continua funcionando perfeitamente — internamente ele herda de `SqliteAuthState` e armazena os dados no SQLite de forma robusta e compacta.
 
-Altere o valor `BOT_TOKEN` para o token do seu bot para se conectar a ele, acaso não tenha consulte a documentação do [Telegram](https://core.telegram.org/bots/api) para gerar um.
+---
 
-```ts
-const client = new Client(new TelegramBot());
-client.connect("BOT_TOKEN");
+## 🗄️ Armazenamento em SQLite
 
-client.on("open", () => {
-  console.log("Bot conectado!");
-});
-```
+Diferente das versões antigas que geravam milhares de arquivos JSON em disco, o novo módulo utiliza o driver SQLite nativo (`bun:sqlite` no Bun ou `node:sqlite` no Node 22+):
 
-## Configurações
+- **Domínios ZapoJS**: `auth`, `signal`, `preKey`, `session`, `identity`, `senderKey`, `appState`, `privacyToken`, `messages`, `threads`, `contacts`.
+- **Tabelas internas do Rompot**:
+  - `rompot_records`: Armazena registros de chats (`chats-*`), usuários (`users-*`) e enquetes (`polls-*`).
+  - `rompot_lid_mapping`: Armazena permanentemente os mapeamentos `LID ↔ PN` aprendidos.
 
-```ts
-type ConnectionConfig = {
-  /** Desativa execução do comando automático */
-  disableAutoCommand: boolean;
-  /** Desativa os comandos para mensagem antiga */
-  disableAutoCommandForOldMessage: boolean;
-  /** Desativa a execução do comando automático para mensagens não oficiais */
-  disableAutoCommandForUnofficialMessage: boolean;
-  /** Desativa a digitação automatica */
-  disableAutoTyping: boolean;
-  /** Desativa a leitura automatica de uma mensagem */
-  disableAutoRead: boolean;
-  /** Máximo de reconexões possíveis */
-  maxReconnectTimes: number;
-  /** Tempo de aguarde para se reconectar */
-  reconnectTimeout: number;
-  /** Máximo de tentativas de solitação acaso a primeira falhe */
-  maxRequests: number;
-  /** Tempo necessário de aguardo para próxima tentativa de solicitação */
-  requestsDelay: number;
-  /** Tempo máximo de espera */
-  maxTimeout: number;
-};
+---
 
-client.config = config;
-```
+## ⚡ Acesso Direto ao ZapoJS (`bot.native`)
 
-## ⚙️ Criando comandos
+Para recursos avançados ou futuros da BDFW, você pode acessar diretamente a instância de `WaClient` através de `bot.native`:
 
 ```ts
-import { CMDKey, Command, Message } from "rompot";
+const bot = new WhatsAppBot();
+const client = new Client(bot);
+await client.connect(auth);
 
-// Cria um comando com o nome hello
-// Ao ser executado envia a mensagem "Hello World!"
-class HelloCommand extends Command {
-  public onRead() {
-    this.keys = [CMDKey("hello")];
-  }
+// Acesso aos coordinators nativos do ZapoJS:
+const zapo = bot.native;
 
-  public async onExec(message: Message) {
-    await message.reply(`Hello World!`);
-  }
-}
+// Envio nativo
+await zapo.message.send("5511999999999", "Olá!");
 
-// Listando comandos
-const commands = [new HelloCommand(), new DateCommand()];
+// Newsletters / Canais
+const channel = await zapo.newsletter.queryMetadata("120363@newsletter");
 
-client.setCommands(commands);
+// Grupos
+const metadata = await zapo.group.queryGroupMetadata("120363@g.us");
+
+// Perfil e Privacidade
+await zapo.profile.setPushName("Meu Bot");
+const blocklist = await zapo.privacy.getBlocklist();
 ```
 
-## Eventos
+---
 
-### Conexão
+## 💬 Mensagens
 
-```ts
-client.on("open", (open) => {
-  console.log("Cliente conectado!");
-});
-
-client.on("close", (update) => {
-  console.info(`Cliente desconectou! Motivo: ${update.reason}`);
-});
-
-client.on("stop", (update) => {
-  if (update.isLogout) {
-    console.info(`Cliente desligado!`);
-  } else {
-    console.info(`Cliente parado!`);
-  }
-});
-
-client.on("connecting", (conn) => {
-  console.log("Conectando cliente...");
-});
-
-client.on("reconnecting", (conn) => {
-  console.log("Reconectando cliente...");
-});
-```
-
-### Mensagem
-
-```ts
-client.on("message", (message) => {
-  console.log(`Mensagem recebida de "${message.user.name}"`);
-
-  if (message.text == "Oi") {
-    message.reply("Olá");
-  }
-});
-```
-
-### Usuários
-
-```ts
-client.on("user", async (update) => {
-  if (update.action == "join") {
-    await client.send(new Message(update.chat, `@${update.fromUser.id} entrou no grupo.`));
-  }
-
-  if (update.action == "leave") {
-    await client.send(new Message(update.chat, `@${update.fromUser.id} saiu do grupo...`));
-  }
-
-  if (update.action == "add") {
-    await client.send(new Message(update.chat, `Membro @${update.fromUser.id} adicionou o @${update.user.id} ao grupo!`));
-  }
-
-  if (update.action == "remove") {
-    client.send(new Message(update.chat, `Membro @${update.fromUser.id} removeu o @${update.user.id} do grupo.`));
-  }
-
-  if (update.action == "promote") {
-    client.send(new Message(update.chat, `Membro @${update.fromUser.id} promoveu o @${update.user.id} para admin!`));
-  }
-
-  if (update.action == "demote") {
-    await client.send(new Message(update.chat, `Membro @${update.fromUser.id} removeu o admin do @${update.user.id}.`));
-  }
-});
-```
-
-### Erro interno
-
-```ts
-client.on("error", (err) => {
-  console.error(`Um erro ocorreu: ${err}`);
-});
-```
-
-## Mensagem
+### Texto e Menções
 
 ```ts
 import { Message } from "rompot";
 
-// Chat
-const chat = new Chat("id12345");
+// Envio simples
+await client.sendMessage(chat, "Olá mundo!");
 
-// Criar mensagem
-const msg = new Message(chat, "texto");
+// Mensagem com menções e citação
+const msg = new Message(chat, "Olá @5511999999999!");
+msg.mentions = ["5511999999999@s.whatsapp.net"];
+msg.mention = originalMessage; // citação / reply
+await client.send(msg);
 
-// Enviar mensagem
-const saveMsg = await client.send(msg);
+// Editar mensagem
+await client.editMessage(msg, "Texto corrigido!");
 
-// Edita uma mensagem enviada
-await client.editMessage(saveMsg, "novo texto");
+// Apagar mensagem para todos (Revoke)
+await client.deleteMessage(msg);
 
-// Mencionar usuário
-msg.mentions.push("userId");
+// Reagir
+await client.addReaction(msg, "❤️");
+await client.removeReaction(msg);
 
-// Marcar mensagem
-msg.mention = message;
-
-// Responder mensagem
-msg.reply(message);
-
-// Visualiza uma mensagem recebida
-msg.read();
-
-// Reage a mensagem
-msg.addReaction("❤");
-
-// Remove a reação de uma mensagem
-msg.removeReaction();
+// Fixar mensagem (Pin)
+await client.pinMessage(msg, 604800); // 24h (86400), 7d (604800) ou 30d (2592000)
 ```
 
-## Mensagem de mídia
+### Mídias
 
 ```ts
 import { ImageMessage, VideoMessage, AudioMessage, FileMessage, StickerMessage } from "rompot";
 
-// Criar mensagem de audio
-const audioMessage = new AudioMessage(chat, Buffer.from(""));
+// Imagem
+const image = new ImageMessage(chat, "Legenda da imagem", imageBuffer);
+await client.send(image);
 
-// Criar mensagem com imagem
-const imageMessage = new ImageMessage(chat, "texto", Buffer.from(""));
+// Áudio / Nota de Voz (PTT)
+const audio = new AudioMessage(chat, audioBuffer);
+audio.isPTT = true; // envia como gravação de voz
+await client.send(audio);
 
-// Criar mensagem com video
-const videoMessage = new VideoMessage(chat, "texto", Buffer.from(""));
+// Vídeo (ou GIF)
+const video = new VideoMessage(chat, "Vídeo demonstrativo", videoBuffer);
+video.isGIF = true; // reprodução contínua sem áudio
+await client.send(video);
 
-// Criar mensagem de arquivo
-const fileMessage = new FileMessage(chat, "texto", Buffer.from(""));
+// Documento / Arquivo
+const file = new FileMessage(chat, "Relatório PDF", fileBuffer);
+file.name = "relatorio.pdf";
+file.mimetype = "application/pdf";
+await client.send(file);
 
-// Criar mensagem de sticker
-const stickerMessage = new StickerMessage(chat, Buffer.from(""));
+// Figurinha / Sticker
+const sticker = new StickerMessage(chat, stickerBuffer);
+sticker.pack = "Meu Pack";
+sticker.author = "Rompot Bot";
+await client.send(sticker);
+
+// Baixar mídia recebida
+const buffer = await client.downloadStreamMessage(incomingMediaMessage);
 ```
 
-## Outros tipos de mensagem
+### Botões Interativos (Quick Reply)
+
+Os botões utilizam as mensagens interativas nativas do WhatsApp (`nativeFlowMessage`):
 
 ```ts
-import { LocationMessage, ContactMessage, ButtonMessage, ListMessage, PollMessage } from "rompot";
+import { ButtonMessage } from "rompot";
 
-// Criar mensagem de localiação
-// Latitude, Longitude
-const locationMessage = new LocationMessage(chat, 24.121231, 55.1121221);
+const buttons = new ButtonMessage(chat, "Escolha uma opção:", "Rodapé opcional");
+buttons.addReply("Opção 1", "btn_1");
+buttons.addReply("Opção 2", "btn_2");
+buttons.addReply("Suporte", "btn_support");
 
-// Obter dados do endereço da localização
-const address = await locationMessage.getAddress();
-
-// Criar mensagem com contatos
-const contactMessage = new ContactMessage(chat, "nome", "userId");
-
-// Criando botões
-const btnMessage = new ButtonMessage(chat, "texto", "rodapé");
-btnMessage.addCall("Call", "1234567890");
-btnMessage.addUrl("Link", "https://example.com");
-btnMessage.addReply("Texto", "button-id-123");
-
-// Criar lista
-const listMessage = new ListMessage(chat, "texto", "botão", "titulo", "rodapé");
-const index1 = listMessage.addCategory("Categoria 1");
-const index2 = listMessage.addCategory("Categoria 2");
-
-listMessage.addItem(index1, "Item 1");
-listMessage.addItem(index1, "Item 2");
-
-listMessage.addItem(index2, "Abc 1");
-listMessage.addItem(index2, "Abc 2");
-
-// Criar enquete
-const pollMessage = new PollMessage(chat, "Hello World!");
-
-pollMessage.addOption("Hello", "id-hello-123");
-pollMessage.addOption("Hey", "id-hey-123");
-pollMessage.addOption("Hi", "id-hi-123");
+await client.send(buttons);
 ```
 
-## Mensagem personalizada
+### Listas Interativas (Single Select)
 
 ```ts
-import { CustomMessage } from "rompot";
+import { ListMessage } from "rompot";
 
-// Ex: conteúdo para baileys
-const content = { text: "texto" }; 
+const list = new ListMessage(chat, "Selecione um produto do cardápio:", "Abrir Cardápio", "Cardápio", "Preços válidos hoje");
+const lanches = list.addCategory("Lanches");
+list.addItem(lanches, "X-Burger", "Pão, carne e queijo", "item_burger");
+list.addItem(lanches, "X-Salada", "Com salada fresca", "item_salada");
 
-// O conteúdo inserido será enviado diretamente para a plataforma
-const customMessage = new CustomMessage(chat, content);
+const bebidas = list.addCategory("Bebidas");
+list.addItem(bebidas, "Suco Natural", "Laranja ou Maracujá", "item_suco");
 
-// Adicionando opções adicionais
-// Essas alterações serão tratadas pelo processamento da plataforma
-
-//? Na baileys utiliza o relayMessage invés de sendMessage
-customMessage.extra = { isRelay: true }; 
+await client.send(list);
 ```
 
-## Lendo resposas de ButtonMessage, ListMessage e PollMessage
+### Enquetes (Polls)
 
 ```ts
-import { Command, Message, CMDKey, CMDRunType, isPollMessage } from "rompot";
+import { PollMessage } from "rompot";
 
-class ButtonCommand extends Command {
-  public onRead() {
-    this.keys = [CMDKey("cmd-button")];
+const poll = new PollMessage(chat, "Qual seu framework favorito?");
+poll.addOption("ZapoJS", "opt_zapo");
+poll.addOption("Outro", "opt_outro");
+poll.extra.selectableCount = 1; // 1 = escolha única
+
+await client.send(poll);
+```
+
+---
+
+## 👥 IDs no WhatsApp: PN e LID
+
+No WhatsApp atual, um contato possui dois identificadores:
+- **PN (Phone Number)**: `5511999999999@s.whatsapp.net`
+- **LID (Linked Identity)**: `123456789@lid`
+
+O Rompot padroniza tudo para **um único ID canônico**:
+- O **PN** sempre que o número for conhecido;
+- O **LID** apenas se o número estiver oculto (ex: grupos anônimos).
+
+```ts
+message.user.id;          // ID canônico (PN quando conhecido)
+message.user.phoneNumber; // "5511999999999" (vazio se oculto)
+message.user.lid;         // "123456789@lid"
+
+// Resolução de ID
+const pn = await client.resolveId("123456789@lid");
+const identity = await client.getUserIdentity("5511999999999");
+// -> { id, pn, lid, phoneNumber }
+```
+
+---
+
+## 📡 Eventos do Cliente
+
+```ts
+// Conexão
+client.on("open", ({ isNewLogin }) => console.log("Conectado! Novo login:", isNewLogin));
+client.on("close", ({ reason }) => console.log("Desconectado:", reason));
+client.on("stop", ({ isLogout, reason }) => console.log("Parado. Logout:", isLogout));
+client.on("qr", (qr) => { ... });
+client.on("code", (code) => { ... });
+
+// Mensagens recebidas
+client.on("message", async (message) => {
+  if (message.fromMe) return;
+
+  // Resposta a botões ou listas
+  if (message.selected) {
+    console.log(`Usuário clicou no item/botão ID: ${message.selected}`);
   }
 
-  // Recebe uma resposta ao comando
-  public async onReply(message: Message) {
-    await message.reply(`Button Clicked!`);
-  }
-}
-
-client.addCommand(new ButtonCommand());
-
-client.on("message", async (message: Message) => {
-  if (isPollMessage(message)) {
-    // Não responde caso a votação da enquete for removida
-    if (message.action == "remove") return;
+  // Voto em enquete
+  if (message.type === "pollUpdate") {
+    console.log(`Voto alterado: ${message.text} (ação: ${message.action})`);
   }
 
-  // Verifica o ID passado na mensagem como opção
-  if (message.selected == "button-id-123") {
-    const cmd = client.getCommand("cmd-button");
-
-    // Manda a resposta ao comando
-    if (cmd) client.runCommand(cmd, message, CMDRunType.Reply);
+  // Comando simples
+  if (message.text === "!ping") {
+    await message.reply("Pong via ZapoJS! 🏓");
   }
-}):
-```
-
-## Bot
-
-- Definir foto de perfil
-
-```ts
-client.setBotProfile(Buffer.from(""));
-```
-
-- Obter foto de perfil do bot
-
-```ts
-client.getBotProfile();
-```
-
-- Definir nome do bot
-
-```ts
-client.setBotName("Name");
-```
-
-- Definir descrição do bot
-
-```ts
-client.setBotDescription("Description");
-```
-
-- Obter descrição do bot
-
-```ts
-client.getBotDescription();
-```
-
-## Grupo
-
-Você pode obter o chat em `message.chat` ou `client.getChat("id")`, o ID pode ser encontrado em `message.chat.id`
-
-- Criar grupo
-
-```ts
-client.createChat("name");
-```
-
-- Sair de um grupo
-
-```ts
-client.leaveChat(chat);
-```
-
-- Definir imagem do grupo
-
-```ts
-client.setChatProfile(chat, Buffer.from(""));
-```
-
-- Obter imagem do grupo
-
-```ts
-client.getChatProfile(chat);
-```
-
-- Definir nome do grupo
-
-```ts
-client.setChatName(chat, "Name chat");
-```
-
-- Obter nome do grupo
-
-```ts
-client.getChatName(chat);
-```
-
-- Definir a descrição do grupo
-
-```ts
-client.setChatDescription(chat, "Chat description");
-```
-
-- Obter descrição do grupo
-
-```ts
-client.getChatDescription(chat);
-```
-
-- Adicionar membro
-  - Você pode encontrar o user em `message.user`, o ID pode se encontrado em `message.user.id`
-
-```ts
-client.addUserInChat(chat, user);
-```
-
-- Remover membro
-
-```ts
-client.removeUserInChat(chat, user);
-```
-
-- Promover membro
-
-```ts
-client.promoteUserInChat(chat, user);
-```
-
-- Despromover membro
-
-```ts
-client.demoteUserInChat(chat, user);
-```
-
-- Rejeitar chamada
-  - Você pode receber a chamada pelo evento `new-call` ou `call`, porém o evento `call` também recebe atualização de chamadas invez de somente o pedido dela.
-```ts
-client.rejectCall(call);
-```
-
-## IDs no WhatsApp (PN e LID)
-
-O WhatsApp identifica a mesma pessoa de duas formas: pelo número (`5511999999999@s.whatsapp.net`, chamado PN) e pelo LID (`123456789@lid`), um ID que esconde o número. A partir do Baileys 7 as mensagens podem chegar com qualquer um dos dois.
-
-O Rompot entrega **um único ID por pessoa** em `message.user.id`, `message.chat.id` (conversas privadas), `message.mentions`, eventos de grupo e chamadas:
-
-- o PN, sempre que o número é conhecido;
-- o LID, só quando o WhatsApp não revela o número (por exemplo, grupos com número oculto).
-
-Os pares PN ↔ LID ficam salvos pelo Baileys na sessão (`lid-mapping-*`), então o ID continua o mesmo depois de reiniciar. Quando o Rompot descobre o número de alguém que só era conhecido pelo LID, os dados salvos com o LID são movidos para o PN e o evento `id-mapping` é emitido.
-
-```ts
-message.user.id; // "5511999999999@s.whatsapp.net"
-message.user.phoneNumber; // "5511999999999" (vazio quando o número é oculto)
-message.user.lid; // "123456789@lid" (quando conhecido)
-
-await client.resolveId("123456789@lid"); // "5511999999999@s.whatsapp.net"
-await client.getUserIdentity("5511999999999"); // { id, pn, lid, phoneNumber }
-
-client.on("id-mapping", ({ lid, pn }) => {
-  // migre aqui dados que você guardou com o LID
 });
-```
 
-Qualquer método aceita número puro, PN ou LID, com ou sem sufixo de dispositivo.
+// Eventos de usuários em grupos
+client.on("user", ({ action, event, chat, user, fromUser }) => {
+  // action: 'join' | 'leave' | 'add' | 'remove' | 'promote' | 'demote'
+});
 
-## Recursos do WhatsApp (Baileys 7)
-
-```ts
-// Grupo
-await client.setChatAnnounce(chat, true); // só admins enviam mensagens
-await client.setChatLocked(chat, true); // só admins editam nome, descrição e foto
-await client.setChatEphemeral(chat, 604800); // mensagens temporárias (0 desativa)
-await client.setChatMemberAddMode(chat, false); // só admins adicionam membros
-await client.setChatJoinApproval(chat, true); // entrada exige aprovação
-await client.getChatJoinRequests(chat); // [{ user, requestedAt, method }]
-await client.approveChatJoinRequests(chat, ["5511999999999"]);
-await client.rejectChatJoinRequests(chat, ["5511999999999"]);
-await client.getChatInviteInfo("https://chat.whatsapp.com/CODIGO");
-
-// Mensagem
-await client.pinMessage(message, 86400); // 86400, 604800 ou 2592000 segundos
-await client.unpinMessage(message);
-await client.starMessage(message, true);
-await client.forwardMessage("5511999999999", message);
-
-// Usuários e presença
-await client.isOnWhatsApp("5511999999999"); // { exists, id }
-await client.getBlockedUsers();
-await client.subscribePresence(chat); // passa a emitir "presence"
-
-// Use client.supports("pinMessage") para saber se a plataforma atual oferece o recurso.
-```
-
-### Eventos novos
-
-```ts
+// Configuração de grupo alterada
 client.on("group-update", ({ action, changes, chat, fromUser }) => {
-  // action: name | description | announce | restrict | inviteCode | memberAddMode | joinApprovalMode | ephemeralDuration
+  // action: 'name' | 'description' | 'announce' | 'restrict' | 'inviteCode' | 'memberAddMode' | 'joinApprovalMode' | 'ephemeralDuration'
 });
 
+// Pedido de entrada em grupo com aprovação
 client.on("group-join-request", ({ action, method, chat, user, fromUser }) => {
-  // action: created | revoked | rejected
+  // action: 'created' | 'revoked' | 'rejected'
 });
 
+// Presença e status
 client.on("presence", ({ chat, user, status, lastSeen }) => {
-  // status: available | unavailable | composing | recording | paused
+  // status: 'available' | 'unavailable' | 'composing' | 'recording' | 'paused'
 });
 
-client.on("blocklist", ({ action, users }) => {});
-client.on("id-mapping", ({ lid, pn, phoneNumber }) => {});
-client.on("call-ended", (call) => {}); // também emitido quando a chamada é encerrada (terminate)
+// Chamadas
+client.on("call", (call) => {
+  console.log(`Chamada recebida de: ${call.user.id}`);
+  // Rejeitar chamada se desejado:
+  client.rejectCall(call);
+});
+
+// Lista de bloqueados
+client.on("blocklist", ({ action, users }) => {
+  console.log("Blocklist atualizada:", users);
+});
+
+// Mapeamento de LID aprendido
+client.on("id-mapping", ({ lid, pn, phoneNumber }) => {
+  console.log(`LID ${lid} mapeado para ${pn} (${phoneNumber})`);
+});
 ```
 
-### Desempenho
+---
 
-- Metadados de grupo ficam em cache (`groupMetadataCacheTTL`, padrão 5 min) e são atualizados pelos eventos de participantes, sem consultar o WhatsApp a cada envio.
-- Mensagens recentes ficam em cache por ID (`messageCacheTTL`, padrão 30 min) para reenvio, votos de enquete, citação e encaminhamento.
-- Registros de chats e usuários ficam em memória e são gravados no disco em lote.
-- A versão do WhatsApp Web é buscada ao conectar (`autoFetchLatestVersion`, padrão `true`).
-- O histórico completo só é pedido com `autoSyncHistory: true`.
+## 🤖 Gestão de Grupos
+
+```ts
+// Informações do grupo
+const admins = await client.getChatAdmins(chat);
+const users = await client.getChatUsers(chat);
+const leader = await client.getChatLeader(chat);
+
+// Alterações administrativas
+await client.setChatName(chat, "Novo Nome");
+await client.setChatDescription(chat, "Nova Descrição");
+await client.setChatProfile(chat, imageBuffer);
+await client.setChatAnnounce(chat, true); // apenas admins enviam mensagens
+await client.setChatLocked(chat, true);   // apenas admins alteram dados do grupo
+await client.setChatEphemeral(chat, 604800); // mensagens temporárias de 7 dias
+await client.setChatMemberAddMode(chat, false); // apenas admins adicionam membros
+await client.setChatJoinApproval(chat, true); // entrada exige aprovação
+
+// Membros
+await client.addUserInChat(chat, user);
+await client.removeUserInChat(chat, user);
+await client.promoteUserInChat(chat, user);
+await client.demoteUserInChat(chat, user);
+
+// Pedidos de entrada
+const requests = await client.getChatJoinRequests(chat);
+await client.updateChatJoinRequests(chat, [user], "approve"); // ou "reject"
+
+// Convites
+const inviteCode = await client.getChatInvite(chat);
+await client.revokeChatInvite(chat);
+await client.joinChat("https://chat.whatsapp.com/CODIGO");
+```
+
+---
+
+## ✈️ Telegram
+
+O módulo Telegram permanece disponível para bots do Telegram:
+
+```ts
+import Client, { TelegramBot } from "rompot";
+
+const bot = new TelegramBot();
+const client = new Client(bot);
+
+client.on("open", () => {
+  console.log("Bot Telegram conectado!");
+});
+
+client.on("message", async (msg) => {
+  if (msg.text === "/start") {
+    await msg.reply("Olá pelo Telegram!");
+  }
+});
+
+await client.connect("SEU_TELEGRAM_BOT_TOKEN");
+```
+
+---
 
 ## 📄 Licença
 
-Este projeto está sob a licença MIT - veja o arquivo [LICENSE](https://github.com/Laxeder/rompot/blob/main/LICENSE) para mais detalhes.
+Este projeto está sob a licença MIT.

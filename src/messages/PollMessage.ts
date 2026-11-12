@@ -35,7 +35,7 @@ export default class PollMessage extends Message {
   public votes: { [user: string]: string[] } = {};
 
   /** Chave secreta associada à enquete. */
-  public secretKey: Uint8Array = Buffer.from("");
+  public secretKey: Uint8Array | Buffer = Buffer.from("");
 
   /** Lista de opções da enquete. */
   public options: PollOption[] = [];

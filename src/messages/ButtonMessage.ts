@@ -12,6 +12,8 @@ export enum ButtonType {
   Url = "url",
   /** Botão para fazer uma chamada */
   Call = "call",
+  /** Botão para copiar código para a área de transferência (ex.: PIX) */
+  Copy = "copy",
 }
 
 /**
@@ -99,6 +101,21 @@ export default class ButtonMessage extends Message {
       type: ButtonType.Call,
       text,
       content: String(phone),
+    });
+
+    return this;
+  }
+
+  /**
+   * Adiciona um botão para copiar código para a área de transferência
+   * @param text - Texto do botão
+   * @param copyCode - Código a ser copiado (ex: código PIX ou cupom)
+   */
+  public addCopy(text: string, copyCode: string) {
+    this.buttons.push({
+      type: ButtonType.Copy,
+      text,
+      content: String(copyCode),
     });
 
     return this;

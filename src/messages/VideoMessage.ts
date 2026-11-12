@@ -13,6 +13,12 @@ export default class VideoMessage extends MediaMessage {
   /** O tipo MIME do vídeo (padrão é "video/mp4"). */
   public mimetype: string = "video/mp4";
 
+  /** Indica se é um vídeo redondo/circular (Push-to-video / Round video note). */
+  public isPTV: boolean = false;
+
+  /** Duração do vídeo em segundos (0 = desconhecida). */
+  public duration: number = 0;
+
   /**
    * Cria uma nova instância de VideoMessage.
    * @param chat - O chat associado à mensagem de vídeo (opcional).
@@ -32,6 +38,15 @@ export default class VideoMessage extends MediaMessage {
    */
   public getVideo() {
     return this.getStream();
+  }
+
+  /**
+   * Define se o vídeo é uma mensagem de vídeo circular (PTV).
+   * @param isPTV - Booleano indicando se é PTV.
+   */
+  public setPTV(isPTV: boolean = true) {
+    this.isPTV = isPTV;
+    return this;
   }
 
   /**

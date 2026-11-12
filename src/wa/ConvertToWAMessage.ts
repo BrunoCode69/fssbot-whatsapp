@@ -1,16 +1,10 @@
-import {
-  generateWAMessage,
-  MiscMessageGenerationOptions,
-  proto,
-} from 'baileys';
-
 import Message, { MessageStatus, MessageType } from '../messages/Message';
 import ListMessage from '../messages/ListMessage';
 import LocationMessage from '../messages/LocationMessage';
 import ReactionMessage from '../messages/ReactionMessage';
 import ContactMessage from '../messages/ContactMessage';
 import StickerMessage from '../messages/StickerMessage';
-import ButtonMessage from '../messages/ButtonMessage';
+import ButtonMessage, { ButtonType } from '../messages/ButtonMessage';
 import MediaMessage from '../messages/MediaMessage';
 import ImageMessage from '../messages/ImageMessage';
 import AudioMessage from '../messages/AudioMessage';
@@ -18,8 +12,8 @@ import VideoMessage from '../messages/VideoMessage';
 import PollMessage from '../messages/PollMessage';
 
 import { getWaSticker } from '../utils/Libs';
-
-import { getID, getPhoneNumber, isGroupJid } from './ID';
+import { getDefaultMediaFileName, isLocalFilePath } from '../utils/MediaUtils';
+import { getID, getPhoneNumber, isGroupJid, normalizeJid } from './ID';
 import { createReactionKey } from './reaction-key';
 import { createInteractiveListPayload } from './interactive-list-payload';
 import type WhatsAppBot from './WhatsAppBot';
@@ -31,7 +25,7 @@ export default class ConvertToWAMessage {
 
   public chatId: string = '';
   public waMessage: any = {};
-  public options: MiscMessageGenerationOptions = {};
+  public options: any = {};
   public isRelay: boolean = false;
 
   constructor(bot: WhatsAppBot, message: Message, isMention: boolean = false) {
@@ -47,348 +41,451 @@ export default class ConvertToWAMessage {
     if (!jid || typeof jid !== 'string') return undefined;
 
     try {
-      return (await this.bot.resolveId(jid)) || undefined;
+      if (this.bot && typeof this.bot.resolveId === 'function') {
+        return (await this.bot.resolveId(jid)) || undefined;
+      }
+      return normalizeJid(jid) || undefined;
     } catch (error) {
-      this.bot.logger?.error?.('Error normalizing JID:', jid, error);
-      return undefined;
+      this.bot?.logger?.error?.('Error normalizing JID', { jid, error } as any);
+      return normalizeJid(jid) || undefined;
     }
   }
 
   /**
-   * * Refatora a mensagem
-   * @param message
+   * * Refatora a mensagem para o formato ZapoJS
    */
   public async refactory(message = this.message): Promise<this> {
     this.waMessage = await this.refactoryMessage(message);
 
-    // Envia sempre para o ID canônico; o Baileys escolhe a sessão LID/PN internamente
-    const chatId = await this.resolveJid(message.chat.id);
-
+    const chatId = await this.resolveJid(message.chat?.id);
     if (!chatId) {
-      throw new Error(`Invalid chat ID: ${message.chat.id}`);
+      throw new Error(`Invalid chat ID: ${message.chat?.id}`);
     }
 
     this.chatId = chatId;
 
     if (message.mention && !this.isMention) {
-      this.options.quoted = await this.createQuoted(message.mention);
+      this.options.quote = await this.createQuoted(message.mention);
     }
 
-    if (MediaMessage.isValid(message))
+    if (MediaMessage.isValid(message)) {
       await this.refactoryMediaMessage(message);
-    if (LocationMessage.isValid(message))
+    } else if (LocationMessage.isValid(message)) {
       this.refactoryLocationMessage(message);
-    if (ReactionMessage.isValid(message))
+    } else if (ReactionMessage.isValid(message)) {
       await this.refactoryReactionMessage(message);
-    if (ContactMessage.isValid(message)) this.refactoryContactMessage(message);
-    if (ButtonMessage.isValid(message)) this.refactoryButtonMessage(message);
-    if (ListMessage.isValid(message)) await this.refactoryListMessage(message);
-    if (PollMessage.isValid(message)) this.refactoryPollMessage(message);
+    } else if (ContactMessage.isValid(message)) {
+      this.refactoryContactMessage(message);
+    } else if (ButtonMessage.isValid(message)) {
+      this.refactoryButtonMessage(message);
+    } else if (ListMessage.isValid(message)) {
+      await this.refactoryListMessage(message);
+    } else if (PollMessage.isValid(message)) {
+      this.refactoryPollMessage(message);
+    }
 
     return this;
   }
 
   /**
-   * Monta a mensagem citada. Usa a mensagem original do cache quando existe
-   * (conteúdo e chave exatos); senão gera uma cópia a partir dos dados do Rompot.
+   * Monta a mensagem citada (quote) para o envio.
    */
-  public async createQuoted(mention: Message) {
-    const cached = this.bot.getCachedWAMessage(mention.extra?.key?.id || mention.id);
-    if (cached?.key?.id) return cached;
-
-    const { waMessage } = await new ConvertToWAMessage(this.bot, mention, true).refactory(mention);
-
-    const key = await this.bot.getMessageKey(mention);
-    const userJid = (await this.resolveJid(mention.user?.id)) || this.bot.id;
-
-    const quoted = await generateWAMessage(key?.remoteJid || this.chatId, waMessage, {
-      userJid,
-      upload(): any {
-        return {};
-      },
-    });
-
-    quoted.key.fromMe = key ? !!key.fromMe : userJid == this.bot.id;
-    quoted.key.id = mention.id || quoted.key.id;
-    quoted.key.remoteJid = key?.remoteJid || this.chatId;
-
-    if (isGroupJid(this.chatId) && !quoted.key.fromMe) {
-      quoted.key.participant = key?.participant || userJid;
-    }
-
-    return quoted;
-  }
-
-  /**
-   * * Refatora outras informações da mensagem
-   * @param message
-   * @returns
-   */
-  public async refactoryMessage(message: Message) {
-    const msg: any = {};
-
-    msg.text = message.text;
-
-    const normalizedChatId = await this.resolveJid(message.chat.id);
-    const normalizedUserId = await this.resolveJid(message.user.id);
-
-    if (normalizedUserId && normalizedChatId && isGroupJid(normalizedChatId)) {
-      msg.participant = normalizedUserId;
-    }
-
-    if (message.mentions) {
-      msg.mentions = [];
-
-      for (const jid of message.mentions) {
-        const normalizedJid = await this.resolveJid(jid);
-        if (normalizedJid && !msg.mentions.includes(normalizedJid)) {
-          msg.mentions.push(normalizedJid);
-        }
-      }
-
-      for (const mention of `${msg.text || ''}`.split(/@(.*?)/)) {
-        const mentionNumber = `${mention.split(/\s+/)[0] || ''}`.replace(/\D+/g, '');
-
-        if (
-          !mentionNumber ||
-          mentionNumber.length < 9 ||
-          mentionNumber.length > 15
-        )
-          continue;
-
-        const jid = await this.resolveJid(getID(mentionNumber));
-
-        if (!jid || msg.mentions.includes(jid)) continue;
-
-        msg.mentions.push(jid);
-      }
-    }
-
-    if (message.fromMe) msg.fromMe = message.fromMe;
-    if (message.id) msg.id = message.id;
-
-    if (message.isEdited) {
-      const key = await this.bot.getMessageKey(message);
-
-      msg.edit = {
-        remoteJid: key?.remoteJid || normalizedChatId || '',
-        id: message.id || '',
-        fromMe: key ? !!key.fromMe : message.fromMe || normalizedUserId == this.bot.id,
-        participant: key?.participant || undefined,
-        toJSON: () => this,
+  public async createQuoted(mention: Message): Promise<any> {
+    const rawKey = mention.extra?.key;
+    if (rawKey?.id && rawKey.remoteJid) {
+      return {
+        remoteJid: rawKey.remoteJid,
+        id: rawKey.id,
+        fromMe: !!rawKey.fromMe,
+        participant: rawKey.participant || undefined,
       };
     }
 
-    if (message.extra?.isRelay) {
-      this.isRelay = true;
-    }
+    const remoteJid = (await this.resolveJid(mention.chat?.id)) || this.chatId;
+    const participant = (await this.resolveJid(mention.user?.id)) || undefined;
+    const fromMe = !!mention.fromMe || (this.bot?.id ? participant === this.bot.id : false);
 
-    return msg;
+    return {
+      remoteJid,
+      id: mention.id || '',
+      fromMe,
+      participant: isGroupJid(remoteJid) && !fromMe ? participant : undefined,
+    };
   }
 
   /**
-   * * Refatora uma mensagem de midia
-   * @param message
+   * Refatora texto, menções e campos base da mensagem
    */
-  public async refactoryMediaMessage(message: MediaMessage) {
-    let stream: Buffer;
+  public async refactoryMessage(message: Message): Promise<any> {
+    const text = message.text || '';
+    const normalizedChatId = await this.resolveJid(message.chat?.id);
+    const normalizedUserId = await this.resolveJid(message.user?.id);
 
-    if (!this.isMention) {
-      stream = await message.getStream();
-    } else {
-      // Create fake stream
-      stream = Buffer.from('');
+    const mentions: string[] = [];
+
+    if (message.mentions) {
+      for (const jid of message.mentions) {
+        const normalizedJid = await this.resolveJid(jid);
+        if (normalizedJid && !mentions.includes(normalizedJid)) {
+          mentions.push(normalizedJid);
+        }
+      }
+
+      for (const mention of `${text}`.split(/@(.*?)/)) {
+        const mentionNumber = `${mention.split(/\s+/)[0] || ''}`.replace(/\D+/g, '');
+
+        if (!mentionNumber || mentionNumber.length < 9 || mentionNumber.length > 15) {
+          continue;
+        }
+
+        const jid = await this.resolveJid(getID(mentionNumber));
+        if (jid && !mentions.includes(jid)) {
+          mentions.push(jid);
+        }
+      }
     }
 
-    // Convert audio message
-    if (AudioMessage.isValid(message)) {
-      this.waMessage.audio = stream;
-      this.waMessage.ptt = !!message.isPTT;
-
-      // Convert image message
-    } else if (ImageMessage.isValid(message)) {
-      this.waMessage.image = stream;
-
-      // Convert video message
-    } else if (VideoMessage.isValid(message)) {
-      this.waMessage.video = stream;
-
-      // Convert sticker message
-    } else if (StickerMessage.isValid(message)) {
-      await this.refatoryStickerMessage(message);
-
-      // Convert default media message (includes file)
-    } else {
-      this.waMessage.document = stream;
+    if (mentions.length) {
+      this.options.mentions = mentions;
+      this.options.contextInfo = {
+        ...(this.options.contextInfo || {}),
+        mentionedJid: mentions,
+      };
     }
 
-    this.waMessage.gifPlayback = !!message?.isGIF;
-    this.waMessage.caption = this.waMessage.text;
-    this.waMessage.mimetype = message.mimetype;
-    this.waMessage.fileName = message.name;
+    if (message.isEdited) {
+      const key = this.bot && typeof this.bot.getMessageKey === 'function'
+        ? await this.bot.getMessageKey(message)
+        : null;
 
-    delete this.waMessage.text;
+      return {
+        type: 'text',
+        text,
+        editKey: {
+          remoteJid: key?.remoteJid || normalizedChatId || '',
+          id: message.id || '',
+          fromMe: key ? !!key.fromMe : message.fromMe || normalizedUserId === this.bot?.id,
+          participant: key?.participant || undefined,
+        },
+      };
+    }
+
+    return {
+      type: 'text',
+      text,
+    };
   }
 
-  public async refatoryStickerMessage(message: StickerMessage) {
+  /**
+   * Refatora mensagens de mídia (imagem, vídeo, áudio, documento, figurinha)
+   */
+  /**
+   * Conteúdo da mídia para o Zapo: caminho de arquivo local é repassado como string (o Zapo
+   * lê em stream, sem carregar tudo em memória); os demais casos viram Buffer.
+   */
+  public async getMediaInput(message: MediaMessage): Promise<Buffer | string> {
+    if (this.isMention) return Buffer.from('');
+    if (isLocalFilePath(message.file)) return message.file;
+
+    return await message.getStream();
+  }
+
+  /** Metadados opcionais (só quando conhecidos) para o envio. */
+  public static getMediaFields(message: MediaMessage, duration?: number): any {
+    const fields: any = {};
+
+    if (message.width > 0 && message.height > 0) {
+      fields.width = message.width;
+      fields.height = message.height;
+    }
+
+    if (duration > 0) fields.seconds = Math.round(duration);
+
+    return fields;
+  }
+
+  public async refactoryMediaMessage(message: MediaMessage): Promise<void> {
+    if (StickerMessage.isValid(message)) {
+      await this.refactoryStickerMessage(message);
+      return;
+    }
+
+    const media = await this.getMediaInput(message);
+
+    if (AudioMessage.isValid(message)) {
+      // `ptt` = mensagem de voz.
+      this.waMessage = {
+        type: 'audio',
+        media,
+        ptt: !!message.isPTT,
+        mimetype: message.mimetype || 'audio/ogg; codecs=opus',
+        ...ConvertToWAMessage.getMediaFields(message, message.duration),
+      };
+    } else if (
+      ImageMessage.isValid(message) &&
+      message.isGIF &&
+      `${message.mimetype || ''}`.startsWith('video/')
+    ) {
+      // GIF vindo como vídeo (ex.: animação do Telegram): vídeo com reprodução de GIF.
+      this.waMessage = {
+        type: 'video',
+        media,
+        caption: this.message.text || undefined,
+        gifPlayback: true,
+        viewOnce: !!message.viewOnce,
+        mimetype: message.mimetype,
+        ...ConvertToWAMessage.getMediaFields(message),
+      };
+    } else if (ImageMessage.isValid(message)) {
+      this.waMessage = {
+        type: 'image',
+        media,
+        caption: this.message.text || undefined,
+        viewOnce: !!message.viewOnce,
+        mimetype: message.mimetype || 'image/jpeg',
+        ...ConvertToWAMessage.getMediaFields(message),
+      };
+    } else if (VideoMessage.isValid(message) && message.isPTV) {
+      // Vídeo redondo: tipo próprio do Zapo (`ptvMessage`), sem legenda.
+      this.waMessage = {
+        type: 'ptv',
+        media,
+        mimetype: message.mimetype || 'video/mp4',
+        ...ConvertToWAMessage.getMediaFields(message, message.duration),
+      };
+    } else if (VideoMessage.isValid(message)) {
+      this.waMessage = {
+        type: 'video',
+        media,
+        caption: this.message.text || undefined,
+        gifPlayback: !!message.isGIF,
+        viewOnce: !!message.viewOnce,
+        mimetype: message.mimetype || 'video/mp4',
+        ...ConvertToWAMessage.getMediaFields(message, message.duration),
+      };
+    } else {
+      const mimetype = message.mimetype || 'application/octet-stream';
+
+      this.waMessage = {
+        type: 'document',
+        media,
+        fileName: message.name || getDefaultMediaFileName(mimetype),
+        mimetype,
+        caption: this.message.text || undefined,
+      };
+    }
+  }
+
+  public async refactoryStickerMessage(message: StickerMessage): Promise<void> {
+    const waSticker = this.isMention ? undefined : await getWaSticker();
+
+    // Sem wa-sticker o arquivo local vai como caminho (stream), sem ler em memória.
+    if (!waSticker) {
+      this.waMessage = {
+        type: 'sticker',
+        media: await this.getMediaInput(message),
+      };
+      return;
+    }
+
     const stickerFile = await message.getSticker();
 
-    this.waMessage = { ...this.waMessage, sticker: stickerFile };
-
     try {
-      const waSticker = await getWaSticker();
-
-      if (waSticker) {
-        const sticker = new waSticker.default(stickerFile, {
-          pack: message.pack,
-          author: message.author,
-          categories: message.categories,
-          id: message.stickerId,
-          type: waSticker.StickerTypes.FULL,
-          quality: 100,
-        });
-
-        this.waMessage = { ...this.waMessage, ...(await sticker.toMessage()) };
+      const sticker = new waSticker.default(stickerFile, {
+        pack: message.pack,
+        author: message.author,
+        categories: message.categories,
+        id: message.stickerId,
+        type: waSticker.StickerTypes.FULL,
+        quality: 100,
+      });
+      const built = await sticker.toMessage();
+      if (built?.stickerMessage) {
+        this.waMessage = {
+          stickerMessage: built.stickerMessage,
+        };
+        return;
       }
     } catch (err) {
-      this.bot.emit('error', err);
+      this.bot?.emit('error', err);
     }
+
+    this.waMessage = {
+      type: 'sticker',
+      media: stickerFile,
+    };
   }
 
-  public refactoryLocationMessage(message: LocationMessage) {
-    this.waMessage.location = {
-      degreesLatitude: message.latitude,
-      degreesLongitude: message.longitude,
+  public refactoryLocationMessage(message: LocationMessage): void {
+    this.waMessage = {
+      locationMessage: {
+        degreesLatitude: message.latitude,
+        degreesLongitude: message.longitude,
+        name: message.name || undefined,
+        address: message.address || undefined,
+        url: message.url || undefined,
+      },
+      location: {
+        latitude: message.latitude,
+        longitude: message.longitude,
+        name: message.name || undefined,
+        address: message.address || undefined,
+        url: message.url || undefined,
+      },
     };
-
-    delete this.waMessage.text;
   }
 
-  public refactoryContactMessage(message: ContactMessage) {
-    this.waMessage.contacts = {
-      displayName: message.text,
-      contacts: [],
-    };
+  public refactoryContactMessage(message: ContactMessage): void {
+    const contacts: Array<{ displayName: string; vcard: string }> = [];
 
-    for (const user of message.contacts) {
-      const normalizedUserId = this.bot.canonicalId(user.id);
-      if (!normalizedUserId) continue;
+    for (const user of message.contacts || []) {
+      const rawId = user.id || '';
+      const normalizedUserId = this.bot?.canonicalId
+        ? this.bot.canonicalId(rawId)
+        : normalizeJid(rawId);
 
-      const phoneNumber = getPhoneNumber(normalizedUserId);
-      if (!phoneNumber) continue;
-      const displayName = user.name || message.text || user.id;
+      const phoneNumber = getPhoneNumber(normalizedUserId || rawId);
+      const displayName = user.name || message.text || rawId;
       const vcard =
         'BEGIN:VCARD\n' +
         'VERSION:3.0\n' +
         `FN:${displayName}\n` +
         (user.description ? `ORG:${user.description};\n` : '') +
-        `TEL;type=CELL;type=VOICE;waid=${phoneNumber}: ${phoneNumber}\n` +
+        (phoneNumber ? `TEL;type=CELL;type=VOICE;waid=${phoneNumber}: ${phoneNumber}\n` : '') +
         'END:VCARD';
 
-      this.waMessage.contacts.contacts.push({
-        displayName,
-        vcard,
-      });
+      contacts.push({ displayName, vcard });
+    }
+
+    if (contacts.length === 1) {
+      this.waMessage = {
+        contactMessage: contacts[0],
+        contacts: {
+          displayName: message.text,
+          contacts,
+        },
+      };
+    } else {
+      this.waMessage = {
+        contactsArrayMessage: {
+          displayName: message.text,
+          contacts,
+        },
+        contacts: {
+          displayName: message.text,
+          contacts,
+        },
+      };
     }
 
     delete this.waMessage.text;
   }
 
-  /**
-   * * Refatora uma mensagem de reação
-   * @param message
-   */
-  public async refactoryReactionMessage(message: ReactionMessage) {
+  public async refactoryReactionMessage(message: ReactionMessage): Promise<void> {
     const rawKey = message.extra?.key;
-    const normalizedChatId = await this.resolveJid(message.chat.id);
-    const normalizedUserId = await this.resolveJid(message.user.id);
-    const normalizedBotId = this.bot.id;
+    const normalizedChatId = await this.resolveJid(message.chat?.id);
+    const normalizedUserId = await this.resolveJid(message.user?.id);
+    const normalizedBotId = this.bot?.id;
 
-    // Com a chave original, a reação aponta exatamente para a mensagem recebida
-    const reactionKey = rawKey?.id && rawKey.id == message.id && rawKey.remoteJid
-      ? {
-          remoteJid: rawKey.remoteJid,
-          id: rawKey.id,
-          fromMe: !!rawKey.fromMe,
-          participant: rawKey.fromMe ? undefined : rawKey.participant || undefined,
-        }
-      : createReactionKey(
-          normalizedChatId || message.chat.id,
-          message.id,
-          message.fromMe,
-          normalizedUserId,
-          normalizedBotId,
-          !!normalizedChatId && isGroupJid(normalizedChatId),
-        );
+    const reactionKey =
+      rawKey?.id && rawKey.id === message.id && rawKey.remoteJid
+        ? {
+            remoteJid: rawKey.remoteJid,
+            id: rawKey.id,
+            fromMe: !!rawKey.fromMe,
+            participant: rawKey.fromMe ? undefined : rawKey.participant || undefined,
+          }
+        : createReactionKey(
+            normalizedChatId || message.chat?.id || '',
+            message.id,
+            message.fromMe,
+            normalizedUserId,
+            normalizedBotId,
+            !!normalizedChatId && isGroupJid(normalizedChatId),
+          );
 
     this.waMessage = {
+      type: 'reaction',
+      emoji: message.text || '',
+      target: reactionKey,
       react: {
-        key: {
-          ...reactionKey,
-          toJSON: () => this,
-        },
-        text: message.text,
+        key: reactionKey,
+        text: message.text || '',
       },
     };
   }
 
-  /**
-   * * Refatora uma mensagem de enquete
-   * @param message
-   */
-  public refactoryPollMessage(message: PollMessage) {
+  public refactoryPollMessage(message: PollMessage): void {
     this.waMessage = {
+      type: 'poll',
+      name: message.text || '',
+      options: (message.options || []).map((opt) => opt.name),
+      selectableCount: Number(message.extra?.selectableCount || 1),
       poll: {
-        name: message.text,
-        values: message.options.map((opt) => opt.name),
+        name: message.text || '',
+        values: (message.options || []).map((opt) => opt.name),
         selectableCount: Number(message.extra?.selectableCount || 1),
       },
     };
   }
 
-  /**
-   * * Refatora uma mensagem de botão com formato simples
-   * Converte para formato compatível com baileys
-   * @param message
-   */
-  public refactoryButtonMessage(message: ButtonMessage) {
-    // Valida se há botões
+  public refactoryButtonMessage(message: ButtonMessage): void {
     if (!message.buttons || message.buttons.length === 0) {
       throw new Error('ButtonMessage deve ter pelo menos um botão');
     }
 
-    // Máximo de 3 botões
     if (message.buttons.length > 3) {
       throw new Error('ButtonMessage suporta no máximo 3 botões');
     }
 
-    // Converte botões para formato baileys_helper
-    const buttons = message.buttons.map((button, index) => ({
-      name: 'quick_reply',
-      buttonParamsJson: JSON.stringify({
-        display_text: button.text,
-        id: button.content || `btn_${index}`,
-      }),
-    }));
+    const buttons = message.buttons.map((button, index) => {
+      const type = button.type || 'reply';
+      if (type === 'url' || type === ButtonType.Url) {
+        return {
+          name: 'cta_url',
+          buttonParamsJson: JSON.stringify({
+            display_text: button.text,
+            url: button.content,
+            merchant_url: button.content,
+          }),
+        };
+      }
+      if (type === 'call' || type === ButtonType.Call) {
+        return {
+          name: 'cta_call',
+          buttonParamsJson: JSON.stringify({
+            display_text: button.text,
+            phone_number: button.content,
+          }),
+        };
+      }
+      if (type === 'copy' || type === ButtonType.Copy) {
+        return {
+          name: 'cta_copy',
+          buttonParamsJson: JSON.stringify({
+            display_text: button.text,
+            copy_code: button.content,
+          }),
+        };
+      }
+      return {
+        name: 'quick_reply',
+        buttonParamsJson: JSON.stringify({
+          display_text: button.text,
+          id: button.content || `btn_${index}`,
+        }),
+      };
+    });
 
-    // Marca para usar baileys_helper e gera formato interativo
     this.waMessage = {
       __useBaileysHelper: true,
       text: message.text || '',
       footer: message.footer || undefined,
       interactiveButtons: buttons,
     };
-
-    this.isRelay = false;
   }
 
-  /**
-   * * Refatora uma mensagem de lista
-    * Converte para o formato interativo single-select do helper WhatsApp
-   * @param message
-   */
-  public async refactoryListMessage(message: ListMessage) {
-    // Valida se há pelo menos uma seção com itens
+  public async refactoryListMessage(message: ListMessage): Promise<void> {
     if (!message.list || message.list.length === 0) {
       throw new Error('Lista deve ter pelo menos uma seção');
     }
@@ -399,23 +496,9 @@ export default class ConvertToWAMessage {
     }
 
     this.waMessage = createInteractiveListPayload(message);
-    this.isRelay = false;
   }
 
-  public static convertToWaMessageStatus(
-    status: MessageStatus,
-  ): proto.WebMessageInfo.Status {
-    if (status == MessageStatus.Error) return proto.WebMessageInfo.Status.ERROR;
-    if (status == MessageStatus.Sending)
-      return proto.WebMessageInfo.Status.PENDING;
-    if (status == MessageStatus.Sended)
-      return proto.WebMessageInfo.Status.SERVER_ACK;
-    if (status == MessageStatus.Received)
-      return proto.WebMessageInfo.Status.DELIVERY_ACK;
-    if (status == MessageStatus.Readed) return proto.WebMessageInfo.Status.READ;
-    if (status == MessageStatus.Played)
-      return proto.WebMessageInfo.Status.PLAYED;
-
-    return proto.WebMessageInfo.Status.PENDING;
+  public static convertToWaMessageStatus(status: MessageStatus): any {
+    return status;
   }
 }

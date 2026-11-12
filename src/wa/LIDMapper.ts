@@ -259,6 +259,18 @@ export class LIDMapper {
     };
   }
 
+  /** Grava imediatamente todos os pares pendentes no store persistente. */
+  public async flush(): Promise<void> {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = undefined;
+    }
+    const pairs = this.pendingPersist.splice(0, this.pendingPersist.length);
+    if (pairs.length && this.store) {
+      await this.store.storeLIDPNMappings(pairs).catch(() => undefined);
+    }
+  }
+
   /** Agrupa os pares a persistir numa única gravação no store do Baileys. */
   private queuePersist(pair: LIDPNPair): void {
     this.pendingPersist.push(pair);

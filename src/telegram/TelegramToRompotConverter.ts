@@ -17,6 +17,7 @@ import PollMessage from '../messages/PollMessage';
 import User from '../modules/user/User';
 
 import { TelegramUtils } from './TelegramUtils';
+import { toMediaNumber } from '../utils/MediaUtils';
 
 export default class TelegramToRompotConverter {
   public telegramMessage: TelegramBotAPI.Message;
@@ -89,6 +90,7 @@ export default class TelegramToRompotConverter {
     this.convertAnimantion();
     this.convertPhoto();
     this.convertVideo();
+    this.convertVideoNote();
     this.convertAudio();
     this.convertVoice();
     this.convertDocument();
@@ -125,87 +127,129 @@ export default class TelegramToRompotConverter {
   public convertAnimantion() {
     if (!this.telegramMessage.animation) return;
 
+    const animation = this.telegramMessage.animation;
+
     this.rompotMessage = ImageMessage.fromJSON({
       ...this.rompotMessage,
       isGIF: true,
       type: MessageType.Image,
-      mimeType: this.telegramMessage.animation.mime_type,
-      name: this.telegramMessage.animation.file_name,
-      file: { stream: this.telegramMessage.animation },
+      ...TelegramToRompotConverter.getMediaInfo(animation, 'video/mp4'),
+      file: { stream: animation },
     });
   }
 
   public convertPhoto() {
     if (!this.telegramMessage.photo) return;
 
+    const photo =
+      this.telegramMessage.photo[this.telegramMessage.photo.length - 1 || 0] ||
+      ({} as TelegramBotAPI.PhotoSize);
+
     this.rompotMessage = ImageMessage.fromJSON({
       ...this.rompotMessage,
       type: MessageType.Image,
-      file: {
-        stream:
-          this.telegramMessage.photo[
-            this.telegramMessage.photo.length - 1 || 0
-          ] || {},
-      },
+      // O Telegram recomprime fotos sempre em JPEG.
+      ...TelegramToRompotConverter.getMediaInfo(photo, 'image/jpeg'),
+      file: { stream: photo },
     });
   }
 
   public convertVideo() {
     if (!this.telegramMessage.video) return;
 
+    const video = this.telegramMessage.video;
+
     this.rompotMessage = VideoMessage.fromJSON({
       ...this.rompotMessage,
       type: MessageType.Video,
-      mimeType: this.telegramMessage.video.mime_type,
-      duration: this.telegramMessage.video.duration,
-      file: { stream: this.telegramMessage.video },
+      ...TelegramToRompotConverter.getMediaInfo(video, 'video/mp4'),
+      duration: toMediaNumber(video.duration),
+      file: { stream: video },
+    });
+  }
+
+  public convertVideoNote() {
+    if (!this.telegramMessage.video_note) return;
+
+    const videoNote = this.telegramMessage.video_note;
+    // Vídeo redondo: quadrado com lado `length`.
+    const side = toMediaNumber(videoNote.length);
+
+    this.rompotMessage = VideoMessage.fromJSON({
+      ...this.rompotMessage,
+      type: MessageType.Video,
+      isPTV: true,
+      ...TelegramToRompotConverter.getMediaInfo(videoNote, 'video/mp4'),
+      width: side,
+      height: side,
+      duration: toMediaNumber(videoNote.duration),
+      file: { stream: videoNote },
     });
   }
 
   public convertAudio() {
     if (!this.telegramMessage.audio) return;
 
+    const audio = this.telegramMessage.audio;
+    const info = TelegramToRompotConverter.getMediaInfo(audio, 'audio/mpeg');
+
     this.rompotMessage = AudioMessage.fromJSON({
       ...this.rompotMessage,
       type: MessageType.Audio,
-      mimeType: this.telegramMessage.audio.mime_type,
-      duration: this.telegramMessage.audio.duration,
-      name: this.telegramMessage.audio.title,
-      file: { stream: this.telegramMessage.audio },
+      ...info,
+      name: info.name || `${audio.title || ''}`,
+      duration: toMediaNumber(audio.duration),
+      file: { stream: audio },
     });
   }
 
   public convertVoice() {
     if (!this.telegramMessage.voice) return;
 
+    const voice = this.telegramMessage.voice;
+
     this.rompotMessage = AudioMessage.fromJSON({
       ...this.rompotMessage,
       isPTT: true,
       type: MessageType.Audio,
-      mimeType: this.telegramMessage.voice.mime_type,
-      duration: this.telegramMessage.voice.duration,
-      file: { stream: this.telegramMessage.voice },
+      ...TelegramToRompotConverter.getMediaInfo(voice, 'audio/ogg'),
+      duration: toMediaNumber(voice.duration),
+      file: { stream: voice },
     });
   }
 
   public convertDocument() {
     if (!this.telegramMessage.document) return;
+    // GIFs chegam com `animation` e também `document`; prevalece a animação.
+    if (this.telegramMessage.animation) return;
+
+    const document = this.telegramMessage.document;
 
     this.rompotMessage = FileMessage.fromJSON({
       ...this.rompotMessage,
       type: MessageType.File,
-      mimeType: this.telegramMessage.document.mime_type,
-      name: this.telegramMessage.document.file_name,
-      file: { stream: this.telegramMessage.document },
+      ...TelegramToRompotConverter.getMediaInfo(
+        document,
+        'application/octet-stream',
+      ),
+      file: { stream: document },
     });
   }
 
   public convertSticker() {
     if (!this.telegramMessage.sticker) return;
 
+    const sticker = this.telegramMessage.sticker;
+    const mimetype = sticker.is_video
+      ? 'video/webm'
+      : sticker.is_animated
+        ? 'application/x-tgsticker'
+        : 'image/webp';
+
     this.rompotMessage = StickerMessage.fromJSON({
       ...this.rompotMessage,
       type: MessageType.Sticker,
+      ...TelegramToRompotConverter.getMediaInfo(sticker, mimetype),
       isGIF: !!(
         this.telegramMessage.sticker.is_animated ||
         this.telegramMessage.sticker.is_video
@@ -217,6 +261,20 @@ export default class TelegramToRompotConverter {
       stickerId: `${this.telegramMessage.sticker.custom_emoji_id || ''}`,
       file: { stream: this.telegramMessage.sticker },
     });
+  }
+
+  /**
+   * Metadados comuns de um arquivo do Telegram (`mime_type`, `file_name`, `file_size`,
+   * `width`, `height`) já nos nomes de campo do Rompot.
+   */
+  public static getMediaInfo(file: any, defaultMimetype: string) {
+    return {
+      mimetype: `${file?.mime_type || defaultMimetype}`,
+      name: `${file?.file_name || ''}`,
+      size: toMediaNumber(file?.file_size),
+      width: toMediaNumber(file?.width),
+      height: toMediaNumber(file?.height),
+    };
   }
 
   public convertContact() {

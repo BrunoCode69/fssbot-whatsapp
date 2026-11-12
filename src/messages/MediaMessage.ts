@@ -10,6 +10,9 @@ export type Media = {
   stream: any;
 };
 
+/** Metadados opcionais da mídia (não obrigatórios em `isValid`). */
+const MEDIA_OPTIONAL_KEYS = ['size', 'width', 'height'];
+
 export default class MediaMessage extends Message {
   /** O tipo de mensagem é Media. */
   public readonly type: MessageType = MessageType.Media;
@@ -19,8 +22,16 @@ export default class MediaMessage extends Message {
   public file: Media | Buffer | string;
   /** Indica se a mídia é um GIF. */
   public isGIF: boolean = false;
+  /** Indica se a mídia é de visualização única (View Once). */
+  public viewOnce: boolean = false;
   /** O nome da mídia. */
   public name: string = '';
+  /** Tamanho da mídia em bytes (0 = desconhecido). */
+  public size: number = 0;
+  /** Largura em pixels de imagens, vídeos e figurinhas (0 = desconhecida). */
+  public width: number = 0;
+  /** Altura em pixels de imagens, vídeos e figurinhas (0 = desconhecida). */
+  public height: number = 0;
 
   /**
    * Cria uma instância de MediaMessage.
@@ -43,10 +54,27 @@ export default class MediaMessage extends Message {
   }
 
   /**
+   * Define se a mensagem é de visualização única.
+   * @param viewOnce - Booleano indicando visualização única.
+   */
+  public setViewOnce(viewOnce: boolean = true) {
+    this.viewOnce = viewOnce;
+    return this;
+  }
+
+  /**
    * Obtém um stream de dados da mensagem de mídia.
    * @returns Um Buffer contendo os dados da mídia.
    */
   public async getStream(): Promise<Buffer> {
+    if (Buffer.isBuffer(this.file)) return this.file;
+    if (typeof this.file === 'string') {
+      try {
+        const { readFileSync, existsSync } = await import('fs');
+        if (existsSync(this.file)) return readFileSync(this.file);
+      } catch {}
+      return Buffer.from(this.file);
+    }
     return await ClientUtils.getClient(this.clientId).downloadStreamMessage(
       this,
     );
@@ -107,7 +135,10 @@ export default class MediaMessage extends Message {
   public static isValid(message: any): message is MediaMessage {
     return (
       typeof message === 'object' &&
-      Object.keys(new MediaMessage()).every((key) => key in message)
+      Object.keys(new MediaMessage())
+        // Campos opcionais novos: JSON de versões antigas não os tem e continua válido.
+        .filter((key) => !MEDIA_OPTIONAL_KEYS.includes(key))
+        .every((key) => key in message)
     );
   }
 }

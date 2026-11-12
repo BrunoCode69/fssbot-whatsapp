@@ -1,5 +1,6 @@
 import ReactionMessage from '../messages/ReactionMessage';
 import { Media } from '../messages/MediaMessage';
+import type { MediaDownloadOptions } from '../utils/MediaUtils';
 import ChatStatus from '../modules/chat/ChatStatus';
 import Message from '../messages/Message';
 import { BotStatus } from './BotStatus';
@@ -57,7 +58,7 @@ export default class BotBase extends BotEvents implements IBot {
 
   public async deleteMessage(message: Message): Promise<void> {}
 
-  public async downloadStreamMessage(media: Media): Promise<Buffer> {
+  public async downloadStreamMessage(media: Media, options?: MediaDownloadOptions): Promise<Buffer> {
     return Buffer.from('');
   }
 

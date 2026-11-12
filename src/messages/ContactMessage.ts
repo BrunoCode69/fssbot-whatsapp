@@ -29,6 +29,19 @@ export default class ContactMessage extends Message {
   }
 
   /**
+   * Adiciona um contato à mensagem.
+   * @param name - Nome do contato.
+   * @param phone - Telefone do contato.
+   * @param description - Descrição/organização (opcional).
+   */
+  public addContact(name: string, phone: string, description?: string) {
+    const user = new User(phone, name);
+    if (description) user.description = description;
+    this.contacts.push(user);
+    return this;
+  }
+
+  /**
    * Converte o objeto atual para uma representação em formato JSON.
    * @returns Um objeto JSON que representa o estado atual do objeto.
    */

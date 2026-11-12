@@ -7,6 +7,9 @@ import TelegramToRompotConverter from "./TelegramToRompotConverter";
 import { TelegramUtils } from "./TelegramUtils";
 import TelegramBot from "./TelegramBot";
 import ButtonMessage from "../messages/ButtonMessage";
+import PollUpdateMessage from "../messages/PollUpdateMessage";
+import { MessageType } from "../messages/Message";
+import { PollAction } from "../messages/PollMessage";
 
 export default class TelegramEvents {
   public telegram: TelegramBot;
@@ -17,7 +20,9 @@ export default class TelegramEvents {
 
   public configAll() {
     this.configMessage();
+    this.configChannelPost();
     this.configCallbackQueries();
+    this.configPollAnswer();
     this.configNewChatMembers();
     this.configLeftChatMember();
   }
@@ -65,10 +70,60 @@ export default class TelegramEvents {
       await this.update(rompotMessage.chat);
 
       this.telegram.emit("message", rompotMessage);
+
+      if (msg?.new_chat_title) {
+        this.telegram.emit("group-update", {
+          action: "name",
+          changes: { name: msg.new_chat_title },
+          chat: rompotMessage.chat,
+          fromUser: rompotMessage.user,
+        });
+      }
     };
 
     this.telegram.bot.on("message", receievMessage);
     this.telegram.bot.on("edited_message", receievMessage);
+  }
+
+  public configChannelPost() {
+    const receiveChannelPost = async (msg: TelegramBotAPI.Message) => {
+      const converter = new TelegramToRompotConverter(msg);
+      const rompotMessage = await converter.convert(true);
+
+      await this.update(rompotMessage.chat);
+      this.telegram.emit("message", rompotMessage);
+    };
+
+    this.telegram.bot.on("channel_post", receiveChannelPost);
+    this.telegram.bot.on("edited_channel_post", receiveChannelPost);
+  }
+
+  public configPollAnswer() {
+    this.telegram.bot.on("poll_answer", async (answer: any) => {
+      try {
+        const user = User.fromJSON({
+          id: TelegramUtils.getId(answer.user),
+          name: TelegramUtils.getName(answer.user),
+          nickname: TelegramUtils.getNickname(answer.user),
+          phoneNumber: TelegramUtils.getPhoneNumber(answer.user.id),
+        });
+
+        const optionIdx = answer.option_ids?.[0] !== undefined ? String(answer.option_ids[0]) : '';
+        const pollUpdate = PollUpdateMessage.fromJSON({
+          type: MessageType.PollUpdate,
+          id: answer.poll_id,
+          user,
+          selected: optionIdx,
+          text: optionIdx,
+          action: answer.option_ids?.length ? PollAction.Add : PollAction.Remove,
+          extra: { pollId: answer.poll_id, optionIds: answer.option_ids },
+        });
+
+        this.telegram.emit("message", pollUpdate);
+      } catch (err) {
+        this.telegram.emit("error", err as any);
+      }
+    });
   }
 
   public configNewChatMembers() {

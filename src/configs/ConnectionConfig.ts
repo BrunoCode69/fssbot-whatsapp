@@ -9,10 +9,12 @@ export default interface ConnectionConfig {
   disableAutoTyping: boolean;
   /** Desativar a leitura automatica de uma mensagem */
   disableAutoRead: boolean;
-  /** Máximo de reconexões possíveis */
+  /** Máximo de reconexões seguidas. Depois disso o cliente emite `stop` com `reason: 'reconnect_failed'`. */
   maxReconnectTimes: number;
-  /** Tempo de aguarde para se reconectar */
+  /** Espera antes da primeira reconexão (ms). Dobra a cada tentativa seguida, até `maxReconnectTimeout`. */
   reconnectTimeout: number;
+  /** Espera máxima entre duas reconexões (ms). */
+  maxReconnectTimeout: number;
   /** Máximo de tentativas de solitação acaso a primeira falhe */
   maxRequests: number;
   /** Tempo necessário de aguardo para próxima tentativa de solicitação */

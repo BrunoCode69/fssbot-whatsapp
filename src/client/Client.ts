@@ -1,4 +1,5 @@
-import { readFileSync } from 'fs';
+import { readFileSync, statSync } from 'fs';
+import { copyFile, writeFile } from 'fs/promises';
 
 import ChatNotDefinedError from '../errors/ChatNotDefinedError';
 
@@ -24,6 +25,11 @@ import IBot from '../bot/IBot';
 import BotBase from '../bot/BotBase';
 
 import { sleep, getError } from '../utils/Generic';
+import {
+  type MediaDownloadOptions,
+  createMediaTooLargeError,
+  getMediaMaxBytes,
+} from '../utils/MediaUtils';
 import MessageHandler, { type MessageHandlerConfig } from '../utils/MessageHandler';
 import Call from '../models/Call';
 
@@ -143,11 +149,16 @@ export default class Client<Bot extends IBot = IBot>
         this.emit('close', update);
 
         if (this.reconnectTimes < this.config.maxReconnectTimes) {
+          const delay = Client.reconnectDelay(this.reconnectTimes, this.config);
           this.reconnectTimes++;
 
-          await sleep(this.config.reconnectTimeout);
+          await sleep(delay);
 
           this.reconnect();
+        } else {
+          // Sem isso o bot ficava desconectado para sempre com o processo vivo.
+          // Quem usa a lib decide o que fazer (o runtime do BDFW encerra e o Docker reinicia).
+          this.emit('stop', { isLogout: false, reason: 'reconnect_failed' });
         }
       } catch (err) {
         this.emit('error', getError(err));
@@ -265,6 +276,20 @@ export default class Client<Bot extends IBot = IBot>
         this.emit('error', getError(err));
       }
     });
+  }
+
+  /**
+   * Espera antes da reconexão número `attempt` (0 = a primeira): dobra a cada tentativa até
+   * `maxReconnectTimeout`, com até 20% de variação para vários bots não voltarem ao mesmo tempo.
+   */
+  public static reconnectDelay(
+    attempt: number,
+    config: Pick<ConnectionConfig, 'reconnectTimeout' | 'maxReconnectTimeout'>,
+  ): number {
+    const base = Math.max(0, config.reconnectTimeout);
+    const max = Math.max(base, config.maxReconnectTimeout ?? base);
+    const delay = Math.min(max, base * 2 ** Math.min(attempt, 30));
+    return Math.round(delay * (0.8 + Math.random() * 0.2));
   }
 
   public async connect(auth: IAuth | string) {
@@ -485,12 +510,28 @@ export default class Client<Bot extends IBot = IBot>
     });
   }
 
-  public async downloadStreamMessage(message: MediaMessage): Promise<Buffer> {
+  public async downloadStreamMessage(
+    message: MediaMessage,
+    options?: MediaDownloadOptions,
+  ): Promise<Buffer> {
     if (!message.file) return Buffer.from('');
 
-    if (Buffer.isBuffer(message.file)) return message.file;
+    const maxBytes = getMediaMaxBytes(options);
+
+    if (Buffer.isBuffer(message.file)) {
+      if (maxBytes && message.file.length > maxBytes) {
+        throw createMediaTooLargeError(maxBytes, message.file.length);
+      }
+
+      return message.file;
+    }
 
     if (typeof message.file == 'string') {
+      if (maxBytes) {
+        const size = statSync(message.file).size;
+        if (size > maxBytes) throw createMediaTooLargeError(maxBytes, size);
+      }
+
       return readFileSync(message.file);
     }
 
@@ -498,6 +539,56 @@ export default class Client<Bot extends IBot = IBot>
       'downloadMedia',
       this.bot.downloadStreamMessage,
       message.file,
+      options,
+    );
+  }
+
+  public async downloadMediaToFile(
+    message: MediaMessage,
+    filePath: string,
+    options?: MediaDownloadOptions,
+  ): Promise<void> {
+    if (!message?.file) {
+      throw new Error('A mensagem não tem mídia para baixar.');
+    }
+
+    const maxBytes = getMediaMaxBytes(options);
+
+    if (Buffer.isBuffer(message.file)) {
+      if (maxBytes && message.file.length > maxBytes) {
+        throw createMediaTooLargeError(maxBytes, message.file.length);
+      }
+
+      const file = message.file;
+      await writeFile(
+        filePath,
+        new Uint8Array(file.buffer, file.byteOffset, file.byteLength),
+      );
+      return;
+    }
+
+    if (typeof message.file == 'string') {
+      const size = statSync(message.file).size;
+      if (maxBytes && size > maxBytes) {
+        throw createMediaTooLargeError(maxBytes, size);
+      }
+
+      await copyFile(message.file, filePath);
+      return;
+    }
+
+    if (typeof this.bot.downloadMediaToFile != 'function') {
+      throw new Error(
+        'Este bot não permite baixar mídia direto para arquivo (downloadMediaToFile).',
+      );
+    }
+
+    await this.funcHandler.exec(
+      'downloadMedia',
+      this.bot.downloadMediaToFile,
+      message.file,
+      filePath,
+      options,
     );
   }
 

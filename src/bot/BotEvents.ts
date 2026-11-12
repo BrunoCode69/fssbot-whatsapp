@@ -10,10 +10,15 @@ import Call from '../models/Call';
 import Message from '../messages/Message';
 import type {
   BlocklistEvent,
+  ChatStateEvent,
   GroupJoinRequestEvent,
   GroupUpdateEvent,
   IdMappingEvent,
+  MessageProtocolEvent,
+  MessageUnavailableEvent,
+  PictureEvent,
   PresenceEvent,
+  ReceiptEvent,
 } from './BotEventTypes';
 /**
  * Mapeia os eventos disponíveis para um bot.
@@ -31,6 +36,8 @@ export type BotEventsMap = {
   stop: {
     /** O bot se desconectou */
     isLogout: boolean;
+    /** Motivo da parada */
+    reason?: any;
   };
   /** Ocorre quando a conexão com o bot é fechada. */
   close: {
@@ -68,6 +75,16 @@ export type BotEventsMap = {
   blocklist: BlocklistEvent;
   /** [WhatsApp] Um LID foi associado a um número de telefone. */
   'id-mapping': IdMappingEvent;
+  /** [WhatsApp] Confirmação de entrega/leitura de mensagens enviadas. */
+  receipt: ReceiptEvent;
+  /** [WhatsApp] Contato digitando/gravando (requer `subscribePresence`). */
+  chatstate: ChatStateEvent;
+  /** [WhatsApp] Mensagem recebida sem conteúdo (visualização única consumida, etc.). */
+  'message-unavailable': MessageUnavailableEvent;
+  /** [WhatsApp] `protocolMessage` bruto recebido. */
+  'message-protocol': MessageProtocolEvent;
+  /** [WhatsApp] Foto de perfil de contato/grupo alterada. */
+  picture: PictureEvent;
   /** Ocorre quando um erro é detectado. */
   error: Error;
 };
