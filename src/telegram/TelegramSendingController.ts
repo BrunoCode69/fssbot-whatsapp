@@ -1,4 +1,7 @@
 import TelegramBotAPI from 'node-telegram-bot-api';
+import { createReadStream } from 'fs';
+import { basename } from 'path';
+import { Readable } from 'stream';
 
 import LocationMessage from '../messages/LocationMessage';
 import ReactionMessage from '../messages/ReactionMessage';
@@ -12,8 +15,10 @@ import TextMessage from '../messages/TextMessage';
 import FileMessage from '../messages/FileMessage';
 import PollMessage from '../messages/PollMessage';
 import ButtonMessage from '../messages/ButtonMessage';
-import Message from '../messages/Message';
+import ListMessage from '../messages/ListMessage';
+import Message, { MessageType } from '../messages/Message';
 
+import { getDefaultMediaFileName, isLocalFilePath } from '../utils/MediaUtils';
 import TelegramToRompotConverter from './TelegramToRompotConverter';
 import { TelegramUtils } from './TelegramUtils';
 import type TelegramBot from './TelegramBot';
@@ -35,6 +40,10 @@ export default class TelegramSendingController {
         labels: message.buttons?.map((button) => button.text) || [],
       });
       return await this.sendButtonMessage(message);
+    }
+
+    if (ListMessage.isValid(message)) {
+      return await this.sendList(message);
     }
 
     if (TextMessage.isValid(message)) {
@@ -132,6 +141,44 @@ export default class TelegramSendingController {
     return await new TelegramToRompotConverter(telegramMessage).convert();
   }
 
+  public async sendList(message: ListMessage): Promise<Message> {
+    const inline_keyboard: TelegramBotAPI.InlineKeyboardButton[][] = [];
+
+    for (const category of message.list || []) {
+      for (const item of category.items || []) {
+        inline_keyboard.push([
+          {
+            text: `${item.title}${item.description ? ` - ${item.description}` : ''}`,
+            callback_data: String(item.id || item.title),
+          },
+        ]);
+      }
+    }
+
+    let text = message.text || '';
+    if (message.title) {
+      text = `*${message.title}*\n\n${text}`;
+    }
+    if (message.footer) {
+      text = `${text}\n\n_${message.footer}_`;
+    }
+
+    const options: TelegramBotAPI.SendMessageOptions = {
+      ...TelegramSendingController.getOptions(message),
+      reply_markup: {
+        inline_keyboard,
+      },
+    };
+
+    const telegramMessage = await this.telegram.bot.sendMessage(
+      Number(message.chat.id),
+      text,
+      options,
+    );
+
+    return await new TelegramToRompotConverter(telegramMessage).convert();
+  }
+
   public async sendReaction(message: ReactionMessage): Promise<Message> {
     const options = TelegramSendingController.getOptions(message);
 
@@ -159,6 +206,18 @@ export default class TelegramSendingController {
   public async sendLocation(message: LocationMessage): Promise<Message> {
     const options = TelegramSendingController.getOptions(message);
 
+    if (message.name && message.address) {
+      const telegramMessage = await this.telegram.bot.sendVenue(
+        Number(message.chat.id),
+        Number(message.latitude || 0),
+        Number(message.longitude || 0),
+        message.name,
+        message.address,
+        options,
+      );
+      return await new TelegramToRompotConverter(telegramMessage).convert();
+    }
+
     const telegramMessage = await this.telegram.bot.sendLocation(
       Number(message.chat.id),
       Number(message.latitude || 0),
@@ -170,7 +229,11 @@ export default class TelegramSendingController {
   }
 
   public async sendPoll(message: PollMessage): Promise<Message> {
-    const options = TelegramSendingController.getOptions(message);
+    const options: any = TelegramSendingController.getOptions(message) || {};
+    if (message.extra?.selectableCount && Number(message.extra.selectableCount) > 1) {
+      options.allows_multiple_answers = true;
+    }
+    options.is_anonymous = false;
 
     const telegramMessage = await this.telegram.bot.sendPoll(
       Number(message.chat.id),
@@ -182,21 +245,33 @@ export default class TelegramSendingController {
     return await new TelegramToRompotConverter(telegramMessage).convert();
   }
 
+  /**
+   * Conteúdo do arquivo para envio: caminho de arquivo local vira stream de leitura
+   * (sem carregar tudo em memória); os demais casos viram Buffer.
+   */
+  public static async getFileInput(message: MediaMessage): Promise<Buffer | Readable> {
+    if (isLocalFilePath(message.file)) return createReadStream(message.file);
+
+    return await message.getStream();
+  }
+
   public async sendAudio(message: AudioMessage): Promise<Message> {
     const options = TelegramSendingController.getOptions(message);
     const fileOptions = TelegramSendingController.getFileOptions(message);
+    const file = await TelegramSendingController.getFileInput(message);
 
+    // `isPTT` = mensagem de voz.
     if (message.isPTT) {
       var telegramMessage = await this.telegram.bot.sendVoice(
         Number(message.chat.id),
-        await message.getStream(),
+        file,
         options,
         fileOptions,
       );
     } else {
       var telegramMessage = await this.telegram.bot.sendAudio(
         Number(message.chat.id),
-        await message.getStream(),
+        file,
         options,
         fileOptions,
       );
@@ -208,17 +283,18 @@ export default class TelegramSendingController {
   public async sendImage(message: ImageMessage): Promise<Message> {
     const options = TelegramSendingController.getOptions(message);
     const fileOptions = TelegramSendingController.getFileOptions(message);
+    const file = await TelegramSendingController.getFileInput(message);
 
     if (message.isGIF) {
       var telegramMessage = await this.telegram.bot.sendAnimation(
         Number(message.chat.id),
-        await message.getStream(),
+        file,
         options,
       );
     } else {
       var telegramMessage = await this.telegram.bot.sendPhoto(
         Number(message.chat.id),
-        await message.getStream(),
+        file,
         options,
         fileOptions,
       );
@@ -230,13 +306,30 @@ export default class TelegramSendingController {
   public async sendVideo(message: VideoMessage): Promise<Message> {
     const options = TelegramSendingController.getOptions(message);
     const fileOptions = TelegramSendingController.getFileOptions(message);
+    const file = await TelegramSendingController.getFileInput(message);
 
-    const telegramMessage = await this.telegram.bot.sendVideo(
-      Number(message.chat.id),
-      await message.getStream(),
-      options,
-      fileOptions,
-    );
+    if (message.isPTV) {
+      // Vídeo redondo (video note): sem legenda.
+      var telegramMessage = await this.telegram.bot.sendVideoNote(
+        Number(message.chat.id),
+        file as any,
+        TelegramSendingController.getVideoNoteOptions(options),
+        fileOptions,
+      );
+    } else if (message.isGIF) {
+      var telegramMessage = await this.telegram.bot.sendAnimation(
+        Number(message.chat.id),
+        file,
+        options,
+      );
+    } else {
+      var telegramMessage = await this.telegram.bot.sendVideo(
+        Number(message.chat.id),
+        file,
+        options,
+        fileOptions,
+      );
+    }
 
     return await new TelegramToRompotConverter(telegramMessage).convert();
   }
@@ -247,7 +340,7 @@ export default class TelegramSendingController {
 
     const telegramMessage = await this.telegram.bot.sendSticker(
       Number(message.chat.id),
-      await message.getStream(),
+      await TelegramSendingController.getFileInput(message),
       options,
       fileOptions,
     );
@@ -261,7 +354,7 @@ export default class TelegramSendingController {
 
     const telegramMessage = await this.telegram.bot.sendDocument(
       Number(message.chat.id),
-      await message.getStream(),
+      await TelegramSendingController.getFileInput(message),
       options,
       fileOptions,
     );
@@ -275,7 +368,7 @@ export default class TelegramSendingController {
 
     const telegramMessage = await this.telegram.bot.sendDocument(
       Number(message.chat.id),
-      await message.getStream(),
+      await TelegramSendingController.getFileInput(message),
       options,
       fileOptions,
     );
@@ -339,6 +432,15 @@ export default class TelegramSendingController {
       if (AudioMessage.isValid(message)) {
         options.duration = Number(message.duration || 0);
       }
+
+      if (VideoMessage.isValid(message)) {
+        if (message.duration > 0) options.duration = Math.round(message.duration);
+
+        if (message.width > 0 && message.height > 0) {
+          options.width = message.width;
+          options.height = message.height;
+        }
+      }
     } else if (ReactionMessage.isValid(message)) {
       options.emoji = `${message.text || ''}`;
     }
@@ -350,11 +452,38 @@ export default class TelegramSendingController {
     return options;
   }
 
+  /** Opções do vídeo redondo: as mesmas do envio, sem legenda nem título. */
+  public static getVideoNoteOptions(
+    options: Record<string, any>,
+  ): TelegramBotAPI.SendVideoNoteOptions {
+    const videoNoteOptions = { ...options };
+
+    delete videoNoteOptions.caption;
+    delete videoNoteOptions.caption_entities;
+    delete videoNoteOptions.title;
+    delete videoNoteOptions.width;
+    delete videoNoteOptions.height;
+
+    return videoNoteOptions;
+  }
+
   public static getFileOptions(
     message: MediaMessage,
     options: TelegramBotAPI.FileOptions = {},
   ) {
-    options.filename = `${message.name || ''}`;
+    const isDocument =
+      message.type == MessageType.File || message.type == MessageType.Media;
+
+    // Documento sem nome: nome do arquivo local ou "document.<ext do mimetype>".
+    // Nos demais tipos, sem nome a biblioteca usa o do arquivo local ou detecta pelo conteúdo.
+    options.filename = `${
+      message.name ||
+      (isDocument
+        ? isLocalFilePath(message.file)
+          ? basename(message.file)
+          : getDefaultMediaFileName(message.mimetype)
+        : '')
+    }`;
     options.contentType = `${message.mimetype || ''}`;
 
     return options;

@@ -1,4 +1,5 @@
-import * as baileys from "baileys";
+import * as zapo from "zapo-js";
+import { proto } from "zapo-js";
 
 export * from "./bot/index";
 export * from "./client/index";
@@ -11,4 +12,4 @@ export * from "./telegram/index";
 export * from "./utils/index";
 export * from "./wa/index";
 
-export { baileys };
+export { zapo, proto };

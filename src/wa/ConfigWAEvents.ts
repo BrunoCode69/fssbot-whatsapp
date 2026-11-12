@@ -1,37 +1,29 @@
-import {
-  DisconnectReason,
-  GroupMetadata,
-  MessageUpsertType,
-  WACallEvent,
-  getContentType,
-  normalizeMessageContent,
-  proto,
-} from 'baileys';
-import { Boom } from '@hapi/boom';
-import Long from 'long';
+import type { WaClient } from 'zapo-js';
+import { proto } from 'zapo-js';
+import type {
+  WaBlocklistResult,
+  WaGroupEvent,
+  WaIncomingAddonEvent,
+  WaIncomingCallEvent,
+  WaIncomingChatstateEvent,
+  WaIncomingMessageEvent,
+  WaIncomingPresenceEvent,
+  WaIncomingProtocolMessageEvent,
+  WaIncomingReceiptEvent,
+  WaIncomingUnavailableMessageEvent,
+  WaPictureEvent,
+} from 'zapo-js';
 
 import { BotStatus } from '../bot/BotStatus';
-import type { GroupUpdateChanges, PresenceStatus } from '../bot/BotEventTypes';
+import type { ChatStateValue, GroupUpdateChanges, PresenceStatus } from '../bot/BotEventTypes';
 import { getPhoneNumber, isGroupJid, isUserJid, normalizeJid } from './ID';
 import Call, { CallStatus } from '../models/Call';
-
 import Chat from '../modules/chat/Chat';
 import User from '../modules/user/User';
 import ChatType from '../modules/chat/ChatType';
 import WhatsAppBot from './WhatsAppBot';
 import ConvertWAMessage from './ConvertWAMessage';
 import ErrorMessage from '../messages/ErrorMessage';
-
-/** Tipos de protocolo que não representam mensagens para o bot. */
-const IGNORED_PROTOCOL_TYPES = new Set<number>([
-  proto.Message.ProtocolMessage.Type.EPHEMERAL_SYNC_RESPONSE,
-  proto.Message.ProtocolMessage.Type.APP_STATE_SYNC_KEY_SHARE,
-  proto.Message.ProtocolMessage.Type.APP_STATE_SYNC_KEY_REQUEST,
-  proto.Message.ProtocolMessage.Type.APP_STATE_FATAL_EXCEPTION_NOTIFICATION,
-  proto.Message.ProtocolMessage.Type.EPHEMERAL_SETTING,
-  proto.Message.ProtocolMessage.Type.HISTORY_SYNC_NOTIFICATION,
-  proto.Message.ProtocolMessage.Type.INITIAL_SECURITY_NOTIFICATION_SETTING_SYNC,
-]);
 
 const CALL_STATUS: Record<string, CallStatus> = {
   offer: CallStatus.Offer,
@@ -49,25 +41,48 @@ export default class ConfigWAEvents {
     this.wa = wa;
   }
 
-  public configureAll() {
-    this.configConnectionUpdate();
-    this.configLidMapping();
-    this.configHistorySet();
-    this.configContactsUpsert();
-    this.configContactsUpdate();
-    this.configChatsDelete();
-    this.configGroupsUpsert();
-    this.configGroupsUpdate();
-    this.configGroupParticipants();
-    this.configGroupJoinRequest();
-    this.configMessagesUpsert();
-    this.configMessagesUpdate();
-    this.configPresence();
-    this.configBlocklist();
-    this.configCall();
+  public configureAll(client?: WaClient): void {
+    const zapo = client || this.wa.zapo;
+    if (!zapo) return;
+
+    this.configAuth(zapo);
+    this.configConnection(zapo);
+    this.configMessages(zapo);
+    this.configGroup(zapo);
+    this.configPresence(zapo);
+    this.configCall(zapo);
+    this.configBlocklist(zapo);
+    this.configReceipts(zapo);
+    this.configChatstate(zapo);
+    this.configMessageExtras(zapo);
+    this.configPicture(zapo);
+    this.configExtraEvents(zapo);
+    if (this.wa.config?.ignoreStatusBroadcast !== false) this.configIgnoreStatus(zapo);
   }
 
-  /** Cria um User com os IDs conhecidos (sem acessar o disco). */
+  /** Momento do stanza (atributo `t`, em segundos) em milissegundos. */
+  private stanzaTimestamp(event: { rawNode?: { attrs?: Readonly<Record<string, string>> } }, seconds?: number): number {
+    const t = seconds ?? Number(event?.rawNode?.attrs?.t);
+    return t && Number.isFinite(t) ? t * 1000 : Date.now();
+  }
+
+  private async toChat(id: string): Promise<Chat> {
+    return isGroupJid(id) ? this.toGroupChat(id) : (await this.wa.getChat(new Chat(id))) || new Chat(id);
+  }
+
+  /**
+   * Descarta mensagens de `status@broadcast` antes da descriptografia (o Zapo ainda envia o ack).
+   * O filtro em `configMessages` continua como segurança caso o descarte não esteja disponível.
+   */
+  public configIgnoreStatus(zapo: WaClient): void {
+    if (typeof (zapo as any).ignoreKey !== 'function') return;
+    try {
+      zapo.ignoreKey({ remoteJid: 'status@broadcast', only: ['message'] });
+    } catch (err) {
+      this.wa.reportError('não foi possível ignorar status@broadcast', err);
+    }
+  }
+
   private async toUser(id?: string | null): Promise<User | undefined> {
     const userId = await this.wa.resolveId(id);
     if (!userId) return undefined;
@@ -82,699 +97,590 @@ export default class ConfigWAEvents {
     });
   }
 
-  /** Cria um Chat de grupo com o nome em cache, sem acessar a rede. */
   private async toGroupChat(id: string): Promise<Chat> {
     const chatId = normalizeJid(id);
     const stored = await this.wa.getChat(new Chat(chatId));
     if (stored) return stored;
 
-    const metadata = this.wa.groupMetadataCache.get<GroupMetadata>(chatId);
-
-    return Chat.fromJSON({ id: chatId, type: ChatType.Group, name: metadata?.subject });
+    const cached = this.wa.groupMetadataCache.get<any>(chatId);
+    return Chat.fromJSON({
+      id: chatId,
+      type: ChatType.Group,
+      name: cached?.subject,
+    });
   }
 
-  public configLidMapping() {
-    this.wa.sock.ev.on('lid-mapping.update', (mapping) => {
+  public configAuth(zapo: WaClient): void {
+    zapo.on('auth_qr', ({ qr }) => {
       try {
-        this.wa.registerIdentity(mapping?.lid, mapping?.pn);
+        this.wa.emit('qr', qr);
       } catch (err) {
-        this.wa.emit('error', err);
+        this.wa.emit('error', err as any);
+      }
+    });
+
+    zapo.on('auth_pairing_code', ({ code }) => {
+      try {
+        this.wa.emit('code', code);
+      } catch (err) {
+        this.wa.emit('error', err as any);
+      }
+    });
+
+    zapo.on('auth_paired', ({ credentials }) => {
+      try {
+        if (credentials.meJid) {
+          this.wa.id = normalizeJid(credentials.meJid);
+          this.wa.phoneNumber = getPhoneNumber(this.wa.id);
+        }
+        if (credentials.meLid) {
+          this.wa.lid = normalizeJid(credentials.meLid);
+          this.wa.registerIdentity(this.wa.lid, this.wa.id);
+        }
+        if (credentials.pushName) {
+          this.wa.name = credentials.pushName;
+        }
+      } catch (err) {
+        this.wa.emit('error', err as any);
       }
     });
   }
 
-  public configGroupParticipants() {
-    this.wa.sock.ev.on('group-participants.update', async (update) => {
+  public configConnection(zapo: WaClient): void {
+    zapo.on('connection', async (event) => {
       try {
-        const groupId = normalizeJid(update?.id);
+        if (event.status === 'open') {
+          const uptime = Date.now();
+          this.wa.lastConnectionUpdateDate = uptime;
+          this.wa.status = BotStatus.Online;
+
+          const creds = zapo.getCredentials();
+          if (creds?.meJid) {
+            this.wa.id = normalizeJid(creds.meJid);
+            this.wa.phoneNumber = getPhoneNumber(this.wa.id);
+          }
+          if (creds?.meLid) {
+            this.wa.lid = normalizeJid(creds.meLid);
+            this.wa.registerIdentity(this.wa.lid, this.wa.id);
+          }
+          if (creds?.pushName) {
+            this.wa.name = creds.pushName;
+          }
+
+          if (this.wa.id) {
+            await this.wa.readUser(
+              { id: this.wa.id },
+              {
+                notify: this.wa.name || undefined,
+                imgUrl: this.wa.profileUrl || undefined,
+              },
+            );
+            await this.wa.readChat(
+              { id: this.wa.id },
+              { subject: this.wa.name || undefined },
+            );
+          }
+
+          this.wa.emit('open', { isNewLogin: event.isNewLogin || false });
+
+          // Carrega e armazena metadados dos grupos participantes em segundo plano
+          void zapo.group
+            .queryAllGroups()
+            .then((groups) => {
+              for (const metadata of groups || []) {
+                this.wa.setGroupMetadata(metadata as any);
+              }
+            })
+            .catch((err) => this.wa.reportError('falha ao carregar os metadados dos grupos', err));
+
+          return;
+        }
+
+        if (event.status === 'close') {
+          this.wa.status = BotStatus.Offline;
+          this.wa.lastConnectionUpdateDate = Date.now();
+
+          await this.wa.flushRecords();
+
+          if (event.isLogout) {
+            this.wa.emit('stop', { isLogout: true, reason: event.reason });
+          } else {
+            this.wa.emit('close', { reason: event.reason || 'connection_closed' });
+          }
+        }
+      } catch (err) {
+        this.wa.emit('error', err as any);
+      }
+    });
+  }
+
+  public configMessages(zapo: WaClient): void {
+    zapo.on('message', async (event: WaIncomingMessageEvent) => {
+      try {
+        if (!event?.key) return;
+        if (event.key.remoteJid === 'status@broadcast') return;
+
+        if (event.key.id && this.wa.hasMessageCache(event.key.id)) {
+          return;
+        }
+
+        if (event.key.id) {
+          this.wa.addMessageCache(event.key.id);
+          this.wa.cacheWAMessage(event as any);
+        }
+
+        // Aprende pares PN ↔ LID alternativos trazidos pelo ZapoJS
+        if (event.key.remoteJidAlt) {
+          this.wa.registerIdentity(event.key.remoteJid, event.key.remoteJidAlt);
+        }
+        if (event.key.participantAlt) {
+          this.wa.registerIdentity(event.key.participant, event.key.participantAlt);
+        }
+
+        const msg = await new ConvertWAMessage(this.wa, event).get();
+
+        const timestamp = event.timestampSeconds
+          ? Number(event.timestampSeconds) * 1000
+          : Date.now();
+
+        const chat = await this.wa.getChat(new Chat(msg.chat.id));
+        const pushName = event.pushName || undefined;
+
+        await this.wa.updateChat({
+          id: msg.chat.id,
+          unreadCount: event.key.fromMe ? chat?.unreadCount : (chat?.unreadCount || 0) + 1,
+          timestamp,
+          name: !isGroupJid(msg.chat.id) && !event.key.fromMe ? pushName : undefined,
+        });
+
+        if (isUserJid(msg.user.id)) {
+          await this.wa.updateUser({
+            id: msg.user.id,
+            name: event.key.fromMe ? undefined : pushName,
+          });
+        }
+
+        this.wa.emit('message', msg);
+      } catch (err) {
+        this.wa.emit(
+          'message',
+          new ErrorMessage(
+            this.wa.canonicalId(event?.key?.remoteJid || ''),
+            err instanceof Error ? err : new Error(String(err)),
+          ),
+        );
+      }
+    });
+
+    zapo.on('message_addon', async (event: WaIncomingAddonEvent) => {
+      try {
+        if (!event?.key) return;
+        if (event.key.id && this.wa.hasMessageCache(event.key.id)) {
+          return;
+        }
+
+        if (event.key.id) {
+          this.wa.addMessageCache(event.key.id);
+        }
+
+        if (event.key.remoteJidAlt) {
+          this.wa.registerIdentity(event.key.remoteJid, event.key.remoteJidAlt);
+        }
+        if (event.key.participantAlt) {
+          this.wa.registerIdentity(event.key.participant, event.key.participantAlt);
+        }
+
+        const msg = await new ConvertWAMessage(this.wa, event).get();
+        this.wa.emit('message', msg);
+      } catch (err) {
+        this.wa.emit(
+          'message',
+          new ErrorMessage(
+            this.wa.canonicalId(event?.key?.remoteJid || ''),
+            err instanceof Error ? err : new Error(String(err)),
+          ),
+        );
+      }
+    });
+  }
+
+  public configGroup(zapo: WaClient): void {
+    zapo.on('group', async (event: WaGroupEvent) => {
+      try {
+        const groupId = normalizeJid(event.groupJid || event.rawActionNode?.attrs?.jid || '');
         if (!groupId || !isGroupJid(groupId)) return;
 
-        this.wa.registerIdentity(update.author, update.authorPn, true);
-        this.wa.registerParticipants(update.participants as any);
-        this.wa.applyParticipantsUpdate(groupId, (update.participants || []) as any, update.action);
+        const authorId = await this.wa.resolveId(event.authorJid);
+        const action = event.action;
 
-        if (update.action == 'modify') return;
+        // Trata membros: add, remove, promote, demote
+        if (
+          action === 'add' ||
+          action === 'remove' ||
+          action === 'promote' ||
+          action === 'demote'
+        ) {
+          const participants = event.participants || [];
 
-        const authorId = await this.wa.resolveId(update.authorPn || update.author);
-
-        for (const participant of update.participants || []) {
-          try {
-            const participantId = await this.wa.resolveId(participant.phoneNumber || participant.id);
+          for (const p of participants) {
+            const rawParticipant = p.phoneJid || p.jid || '';
+            const participantId = await this.wa.resolveId(rawParticipant);
             if (!participantId) continue;
 
-            const isSelfAction = !authorId || authorId == participantId;
+            if (p.lidJid && p.phoneJid) {
+              this.wa.registerIdentity(p.lidJid, p.phoneJid, true);
+            }
 
-            const action =
-              update.action == 'add'
+            const isSelfAction = !authorId || authorId === participantId;
+            const userAction =
+              action === 'add'
                 ? isSelfAction ? 'join' : 'add'
-                : update.action == 'remove'
+                : action === 'remove'
                   ? isSelfAction ? 'leave' : 'remove'
-                  : update.action;
+                  : action;
 
             await this.wa.groupParticipantsUpdate(
-              action,
+              userAction,
               groupId,
               participantId,
               authorId || participantId,
             );
-          } catch (err) {
-            this.wa.emit('error', err);
           }
+          return;
         }
-      } catch (err) {
-        this.wa.emit('error', err);
-      }
-    });
-  }
 
-  public configGroupJoinRequest() {
-    this.wa.sock.ev.on('group.join-request', async (update) => {
-      try {
-        const groupId = normalizeJid(update?.id);
-        if (!groupId || !isGroupJid(groupId)) return;
+        // Trata atualizações de configuração do grupo
+        const changes: GroupUpdateChanges = {};
+        if (event.subject !== undefined) changes.name = event.subject;
+        if (event.description !== undefined) changes.description = event.description;
+        if (action === 'announce') changes.announce = !!event.enabled;
+        if (action === 'restrict') changes.restrict = !!event.enabled;
+        if (event.code !== undefined) changes.inviteCode = event.code;
+        if (action === 'member_add_mode') changes.memberAddMode = event.mode === 'all_member_add';
+        if (action === 'membership_approval_mode') changes.joinApprovalMode = !!event.enabled;
+        if (event.expirationSeconds !== undefined) changes.ephemeralDuration = Number(event.expirationSeconds) || 0;
 
-        this.wa.registerIdentity(update.participant, update.participantPn, true);
-        this.wa.registerIdentity(update.author, update.authorPn, true);
-
-        const user = await this.toUser(update.participantPn || update.participant);
-        if (!user) return;
-
-        const fromUser = await this.toUser(update.authorPn || update.author);
-
-        this.wa.emit('group-join-request', {
-          action: update.action,
-          method: update.method || undefined,
-          chat: await this.toGroupChat(groupId),
-          user,
-          fromUser: fromUser && fromUser.id != user.id ? fromUser : undefined,
-        });
-      } catch (err) {
-        this.wa.emit('error', err);
-      }
-    });
-  }
-
-  public async readMessages(
-    messages: proto.IWebMessageInfo[],
-    type: MessageUpsertType = 'notify',
-  ) {
-    try {
-      for (const message of messages || []) {
-        try {
-          if (!message?.key) continue;
-          if (message.key.remoteJid == 'status@broadcast') continue;
-
-          const normalizedContent = normalizeMessageContent(message.message);
-          const incomingContentType = getContentType(normalizedContent);
-          const incomingPollUpdate = (normalizedContent as any)?.pollUpdateMessage;
-          const isPollUpdate = incomingContentType === 'pollUpdateMessage' || Boolean(incomingPollUpdate);
-          if (isPollUpdate) {
-            console.info('[Rompot poll] raw vote update received', {
-              upsertType: type,
-              eventMessageId: message.key.id,
-              chatId: message.key.remoteJid,
-              contentType: incomingContentType,
-              pollCreationMessageId: incomingPollUpdate?.pollCreationMessageKey?.id,
-              hasVotePayload: Boolean(incomingPollUpdate?.vote?.encPayload?.length && incomingPollUpdate?.vote?.encIv?.length),
-              hasParticipant: Boolean(message.key.participant || message.participant),
-              hasAlternateParticipant: Boolean((message.key as any).participantAlt || (message as any).participantAlt),
-              fromMe: Boolean(message.key.fromMe),
-            });
-          }
-
-          if (!message.message) {
-            if (
-              !(
-                message.messageStubType ==
-                proto.WebMessageInfo.StubType.CIPHERTEXT
-              )
-            ) {
-              continue; // Not read other null messages
-            }
-
-            const msgRetryCount =
-              this.wa.config.msgRetryCounterCache?.get<number>(message.key.id!);
-
-            if (msgRetryCount != this.wa.config.maxMsgRetryCount) {
-              const time = this.wa.config.retryRequestDelayMs || 1000;
-
-              await new Promise((res) => setTimeout(res, time * 3));
-
-              const newMsgRetryCount =
-                this.wa.config.msgRetryCounterCache?.get<number>(
-                  message.key.id!,
-                );
-
-              if (!this.wa.config.readAllFailedMessages) {
-                if (
-                  msgRetryCount &&
-                  newMsgRetryCount &&
-                  msgRetryCount != newMsgRetryCount
-                ) {
-                  continue; // Not read duplicated failed message
-                }
-              }
-            }
-          }
-
-          const protocolType = message.message?.protocolMessage?.type;
-          if (protocolType != null && IGNORED_PROTOCOL_TYPES.has(protocolType)) {
-            continue; // Not read empty messages
-          }
-
-          if (this.wa.messagesCached.includes(message.key.id!)) {
-            if (isPollUpdate) {
-              console.warn('[Rompot poll] raw vote update skipped as duplicate', {
-                eventMessageId: message.key.id,
-                pollCreationMessageId: incomingPollUpdate?.pollCreationMessageKey?.id,
-              });
-            }
-            continue;
-          }
-
-          this.wa.addMessageCache(message.key.id!);
-          this.wa.cacheWAMessage(message as any);
-
-          const msg = await new ConvertWAMessage(this.wa, message as any, type).get();
-
-          let timestamp: number | undefined;
-
-          if (message.messageTimestamp) {
-            if (Long.isLong(message.messageTimestamp)) {
-              timestamp = message.messageTimestamp.toNumber() * 1000;
-            } else {
-              timestamp = (message.messageTimestamp as number) * 1000;
-            }
-          }
-
-          const chat = await this.wa.getChat(new Chat(msg.chat.id));
-          const pushName = message.pushName || message.verifiedBizName || undefined;
+        const changeKeys = Object.keys(changes) as (keyof GroupUpdateChanges)[];
+        if (changeKeys.length) {
+          const chat = await this.toGroupChat(groupId);
+          const fromUser = authorId ? await this.toUser(authorId) : undefined;
 
           await this.wa.updateChat({
-            id: msg.chat.id,
-            unreadCount: message.key.fromMe ? chat?.unreadCount : (chat?.unreadCount || 0) + 1,
-            timestamp,
-            name: !isGroupJid(msg.chat.id) && !message.key.fromMe ? pushName : undefined,
+            id: groupId,
+            name: changes.name || chat.name,
+            description: changes.description || chat.description,
           });
 
-          if (isUserJid(msg.user.id)) {
-            await this.wa.updateUser({
-              id: msg.user.id,
-              name: message.key.fromMe ? undefined : pushName,
-            });
-          }
-
-          if (isPollUpdate) {
-            console.info('[Rompot poll] adapter emitted vote event', {
-              type: msg.type,
-              eventMessageId: msg.id,
-              chatId: msg.chat?.id,
-              pollCreationMessageId: msg.extra?.pollCreationMessageId,
-              action: (msg as any).action,
-              selected: msg.selected,
-              text: msg.text,
-              voterIdPresent: Boolean(msg.user?.id),
-            });
-          }
-
-          if (msg.fromMe && msg.isUnofficial) {
-            await this.wa.updateChat({ id: msg.chat.id, unreadCount: 0 });
-          }
-
-          this.wa.emit('message', msg);
-        } catch (err) {
-          const normalizedContent = normalizeMessageContent(message?.message);
-          const failedPollUpdate = (normalizedContent as any)?.pollUpdateMessage;
-          if (failedPollUpdate) {
-            console.error('[Rompot poll] raw vote update conversion failed', {
-              eventMessageId: message?.key?.id,
-              pollCreationMessageId: failedPollUpdate.pollCreationMessageKey?.id,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
-          this.wa.emit(
-            'message',
-            new ErrorMessage(
-              this.wa.canonicalId(message?.key?.remoteJid || ''),
-              err && err instanceof Error
-                ? err
-                : new Error(JSON.stringify(err)),
-            ),
-          );
-        }
-      }
-    } catch (err) {
-      this.wa.emit('error', err);
-    }
-  }
-
-  public configMessagesUpsert() {
-    this.wa.sock.ev.on('messages.upsert', async (m) => {
-      try {
-        await this.readMessages(m?.messages || [], m.type);
-      } catch (err) {
-        this.wa.emit('error', err);
-      }
-    });
-  }
-
-  public configMessagesUpdate() {
-    this.wa.sock.ev.on('messages.update', async (messages) => {
-      try {
-        for (const message of messages || []) {
-          try {
-            if (message.key.remoteJid == 'status@broadcast') continue;
-
-            if (message.update?.message) {
-              await this.readMessages([{ key: message.key, ...message.update } as any]);
-            }
-
-            if (!message?.update?.status) continue;
-
-            const msg = await new ConvertWAMessage(this.wa, message).get();
-
-            msg.isUpdate = true;
-
-            this.wa.emit('message', msg);
-          } catch (err) {
-            this.wa.emit(
-              'message',
-              new ErrorMessage(
-                this.wa.canonicalId(message?.key?.remoteJid || ''),
-                err && err instanceof Error
-                  ? err
-                  : new Error(JSON.stringify(err)),
-              ),
-            );
-          }
-        }
-      } catch (err) {
-        this.wa.emit('error', err);
-      }
-    });
-  }
-
-  public configConnectionUpdate() {
-    this.wa.sock.ev.on('connection.update', async (update) => {
-      try {
-        this.wa.connectionListeners = this.wa.connectionListeners.filter(
-          (listener) => !listener(update),
-        );
-
-        if (update.connection == 'connecting') {
-          this.wa.lastConnectionUpdateDate = Date.now();
-          this.wa.status = BotStatus.Offline;
-          this.wa.emit('connecting', { action: 'connecting' });
+          this.wa.emit('group-update', {
+            action: changeKeys[0],
+            changes,
+            chat,
+            fromUser,
+          });
+          return;
         }
 
-        if (update.qr) {
-          this.wa.emit('qr', update.qr);
-        }
+        // Trata pedidos de entrada no grupo
+        if (
+          action === 'created_membership_requests' ||
+          action === 'revoked_membership_requests' ||
+          action === 'membership_approval_request'
+        ) {
+          for (const req of event.membershipRequests || []) {
+            const userId = await this.wa.resolveId(req.phoneJid || req.jid);
+            if (!userId) continue;
 
-        if (update.connection == 'open') {
-          const uptime = Date.now();
+            const user = (await this.toUser(userId)) || User.fromJSON({ id: userId });
+            const fromUser = authorId ? await this.toUser(authorId) : undefined;
 
-          this.wa.lastConnectionUpdateDate = uptime;
-          this.wa.status = BotStatus.Online;
-
-          this.wa.id = normalizeJid(this.wa.sock?.user?.id || '');
-          this.wa.lid = normalizeJid((this.wa.sock?.user as any)?.lid || '');
-          this.wa.phoneNumber = getPhoneNumber(this.wa.id);
-          this.wa.name =
-            this.wa.sock?.user?.name ||
-            this.wa.sock?.user?.notify ||
-            this.wa.sock?.user?.verifiedName ||
-            '';
-          this.wa.profileUrl = this.wa.sock?.user?.imgUrl || '';
-
-          if (this.wa.lid) this.wa.registerIdentity(this.wa.lid, this.wa.id);
-
-          this.wa.readUser(
-            { id: this.wa.id },
-            {
-              notify: this.wa.name || undefined,
-              imgUrl: this.wa.profileUrl || undefined,
-            },
-          );
-          this.wa.readChat(
-            { id: this.wa.id },
-            { subject: this.wa.name || undefined },
-          );
-
-          this.wa.emit('open', { isNewLogin: update.isNewLogin || false });
-
-          setTimeout(async () => {
-            try {
-              if (this.wa.lastConnectionUpdateDate != uptime) return;
-
-              await this.wa.reconnect(true, false);
-            } catch (error) {
-              this.wa.emit('error', error);
-            }
-          }, this.wa.config.autoRestartInterval);
-
-          if (this.wa.checkConnectionInterval !== null) {
-            clearInterval(this.wa.checkConnectionInterval);
-          }
-
-          this.wa.checkConnectionInterval = setInterval(() => {
-            if (!this.wa.sock) {
-              if (this.wa.checkConnectionInterval) {
-                clearInterval(this.wa.checkConnectionInterval);
-                this.wa.checkConnectionInterval = null;
-              }
-
-              return;
-            }
-
-            if (this.wa.sock.ws.isOpen) return;
-
-            this.wa.sock.ev.emit('connection.update', {
-              connection: 'close',
-              lastDisconnect: {
-                date: new Date(),
-                error: new Boom('Socket closed', {
-                  statusCode: DisconnectReason.connectionClosed,
-                }),
-              },
-            });
-          }, 10000);
-
-          this.wa.eventsIsStoped = false;
-
-          // Preenche o cache de grupos e aprende os pares LID ↔ PN de todos os participantes
-          const groups = await this.wa.sock.groupFetchAllParticipating();
-
-          for (const metadata of Object.values(groups || {})) {
-            this.wa.setGroupMetadata(metadata);
-          }
-        }
-
-        if (update.connection == 'close') {
-          this.wa.lastConnectionUpdateDate = Date.now();
-          this.wa.status = BotStatus.Offline;
-
-          const status =
-            (update.lastDisconnect?.error as Boom)?.output?.statusCode ||
-            update.lastDisconnect?.error ||
-            500;
-
-          if (this.wa.checkConnectionInterval !== null) {
-            clearInterval(this.wa.checkConnectionInterval);
-            this.wa.checkConnectionInterval = null;
-          }
-
-          await this.wa.flushRecords();
-
-          if (status === DisconnectReason.loggedOut) {
-            this.wa.emit('stop', { isLogout: true });
-          } else if (status === 402) {
-            this.wa.emit('stop', { isLogout: false });
-          } else if (status == DisconnectReason.restartRequired) {
-            await this.wa.saveCreds(this.wa.sock.authState.creds);
-            await this.wa.reconnect(true, true);
-          } else {
-            this.wa.emit('close', { reason: status });
-          }
-        }
-      } catch (err) {
-        this.wa.emit('error', err);
-      }
-    });
-  }
-
-  public configHistorySet() {
-    const ignoreChats: string[] = [];
-
-    this.wa.sock.ev.on('messaging-history.set', async (update) => {
-      // Os pares LID ↔ PN e os contatos do histórico sempre ajudam a manter IDs únicos
-      for (const mapping of update?.lidPnMappings || []) {
-        this.wa.registerIdentity(mapping.lid, mapping.pn);
-      }
-
-      for (const contact of update?.contacts || []) {
-        this.wa.registerIdentity(contact.id, contact.phoneNumber);
-        this.wa.registerIdentity(contact.id, contact.lid);
-      }
-
-      if (!this.wa.config.autoSyncHistory) return;
-
-      for (const chat of update.chats || []) {
-        try {
-          if (!('unreadCount' in chat) || chat.isDefaultSubgroup === true) {
-            ignoreChats.push(normalizeJid(chat.id));
-
-            continue;
-          }
-
-          const isGroup = isGroupJid(chat.id);
-
-          if (!('pinned' in chat) || isGroup) {
-            if (!isGroup) {
-              ignoreChats.push(normalizeJid(chat.id));
-
-              continue;
-            }
-
-            if (
-              !('endOfHistoryTransferType' in chat) &&
-              !('isDefaultSubgroup' in chat)
-            ) {
-              ignoreChats.push(normalizeJid(chat.id));
-
-              continue;
-            }
-          }
-
-          if ((chat.participant?.length || 0) > 0) {
-            if (!chat.participant?.some((p) => this.wa.lidMapper.isSameUser(p.userJid, this.wa.id))) {
-              ignoreChats.push(normalizeJid(chat.id));
-
-              continue;
-            }
-          }
-
-          const autoLoad = isGroup
-            ? this.wa.config.autoLoadGroupInfo
-            : this.wa.config.autoLoadContactInfo;
-
-          if (autoLoad) {
-            await this.wa.readChat({ id: chat.id }, chat);
-          }
-        } catch (err) {
-          this.wa.emit('error', err);
-        }
-      }
-
-      for (const message of update?.messages || []) {
-        try {
-          if (!message?.message || message.key.remoteJid == 'status@broadcast')
-            continue;
-          if (ignoreChats.includes(normalizeJid(message.key.remoteJid || '')))
-            continue;
-
-          this.wa.cacheWAMessage(message);
-
-          const msg = await new ConvertWAMessage(this.wa, message).get();
-
-          msg.isOld = true;
-
-          this.wa.emit('message', msg);
-        } catch (err) {
-          const msg = new ErrorMessage(
-            this.wa.canonicalId(message?.key?.remoteJid || ''),
-            err && err instanceof Error ? err : new Error(JSON.stringify(err)),
-          );
-
-          msg.isOld = true;
-
-          this.wa.emit('message', msg);
-        }
-      }
-    });
-  }
-
-  private async handleContacts(updates: Array<Partial<{ id: string; lid?: string; phoneNumber?: string }>>) {
-    for (const update of updates || []) {
-      try {
-        if (!update?.id) continue;
-
-        this.wa.registerIdentity(update.id, update.phoneNumber);
-        this.wa.registerIdentity(update.id, update.lid);
-
-        if (!this.wa.config.autoLoadContactInfo) continue;
-
-        if (isGroupJid(update.id)) {
-          await this.wa.readChat({ id: update.id }, update as any);
-        } else {
-          await this.wa.readUser({ id: update.phoneNumber || update.id }, update as any);
-        }
-      } catch (err) {
-        this.wa.emit('error', err);
-      }
-    }
-  }
-
-  public configContactsUpdate() {
-    this.wa.sock.ev.on('contacts.update', (updates) => this.handleContacts(updates as any));
-  }
-
-  public configContactsUpsert() {
-    this.wa.sock.ev.on('contacts.upsert', (updates) => this.handleContacts(updates as any));
-  }
-
-  public configGroupsUpsert() {
-    this.wa.sock.ev.on('groups.upsert', async (groups) => {
-      for (const metadata of groups || []) {
-        try {
-          this.wa.setGroupMetadata(metadata);
-
-          await this.wa.readChat({ id: metadata.id }, metadata, false);
-        } catch (err) {
-          this.wa.emit('error', err);
-        }
-      }
-    });
-  }
-
-  public configGroupsUpdate() {
-    this.wa.sock.ev.on('groups.update', async (updates) => {
-      for (const update of updates) {
-        try {
-          if (!update?.id) continue;
-
-          const groupId = normalizeJid(update.id);
-          const cached = this.wa.groupMetadataCache.get<GroupMetadata>(groupId);
-
-          if (cached) {
-            this.wa.setGroupMetadata({ ...cached, ...update, participants: cached.participants } as GroupMetadata);
-          }
-
-          const changes: GroupUpdateChanges = {};
-
-          if (update.subject !== undefined) changes.name = update.subject;
-          if (update.desc !== undefined) changes.description = update.desc;
-          if (update.announce !== undefined) changes.announce = !!update.announce;
-          if (update.restrict !== undefined) changes.restrict = !!update.restrict;
-          if (update.inviteCode !== undefined) changes.inviteCode = update.inviteCode;
-          if (update.memberAddMode !== undefined) changes.memberAddMode = !!update.memberAddMode;
-          if (update.joinApprovalMode !== undefined) changes.joinApprovalMode = !!update.joinApprovalMode;
-          if (update.ephemeralDuration !== undefined) changes.ephemeralDuration = Number(update.ephemeralDuration) || 0;
-
-          const stored = await this.wa.getChat(new Chat(groupId));
-
-          if (this.wa.config.autoLoadGroupInfo || stored) {
-            await this.wa.readChat({ id: groupId }, update, stored == null);
-          }
-
-          const actions = Object.keys(changes) as (keyof GroupUpdateChanges)[];
-
-          if (actions.length) {
-            this.wa.registerIdentity(update.author, update.authorPn, true);
-
-            this.wa.emit('group-update', {
-              action: actions[0],
-              changes,
+            this.wa.emit('group-join-request', {
+              action: action === 'created_membership_requests' ? 'created' : 'revoked',
+              method: (req as any).requestMethod,
               chat: await this.toGroupChat(groupId),
-              fromUser: await this.toUser(update.authorPn || update.author),
+              user,
+              fromUser: fromUser && fromUser.id !== user.id ? fromUser : undefined,
             });
           }
-        } catch (err) {
-          this.wa.emit('error', err);
         }
+      } catch (err) {
+        this.wa.emit('error', err as any);
       }
     });
   }
 
-  public configChatsDelete() {
-    this.wa.sock.ev.on('chats.delete', async (deletions) => {
-      for (const id of deletions) {
-        try {
-          await this.wa.removeChat(new Chat(id));
-        } catch (err) {
-          this.wa.emit('error', err);
-        }
-      }
-    });
-  }
-
-  public configPresence() {
-    this.wa.sock.ev.on('presence.update', async (update) => {
+  public configPresence(zapo: WaClient): void {
+    zapo.on('presence', async (event: WaIncomingPresenceEvent) => {
       try {
-        const chatId = await this.wa.resolveId(update?.id);
+        const rawChatId = event.chatJid || event.stanzaId || '';
+        const chatId = await this.wa.resolveId(rawChatId);
         if (!chatId) return;
 
         const chat = isGroupJid(chatId)
           ? await this.toGroupChat(chatId)
           : (await this.wa.getChat(new Chat(chatId))) || new Chat(chatId);
 
-        for (const [participant, data] of Object.entries(update.presences || {})) {
-          const user = await this.toUser(participant);
-          if (!user || user.id == this.wa.id) continue;
+        const rawUser = (event as any).userJid || (event as any).senderJid || rawChatId;
+        const user = await this.toUser(rawUser);
+        if (!user || user.id === this.wa.id) return;
 
-          this.wa.emit('presence', {
-            chat,
-            user,
-            status: (data?.lastKnownPresence || 'available') as PresenceStatus,
-            lastSeen: data?.lastSeen ? Number(data.lastSeen) * 1000 : undefined,
-          });
-        }
+        const statusStr = (event as any).type || (event as any).status || 'available';
+        const presenceStatus: PresenceStatus =
+          statusStr === 'unavailable'
+            ? 'unavailable'
+            : statusStr === 'composing'
+              ? 'composing'
+              : statusStr === 'recording'
+                ? 'recording'
+                : statusStr === 'paused'
+                  ? 'paused'
+                  : 'available';
+
+        this.wa.emit('presence', {
+          chat,
+          user,
+          status: presenceStatus,
+          lastSeen: (event as any).lastSeen ? Number((event as any).lastSeen) * 1000 : undefined,
+        });
       } catch (err) {
-        this.wa.emit('error', err);
+        this.wa.emit('error', err as any);
       }
     });
   }
 
-  public configBlocklist() {
-    const emitBlocklist = async (action: 'add' | 'remove' | 'set', list: string[]) => {
-      const users: string[] = [];
+  public configCall(zapo: WaClient): void {
+    zapo.on('call', async (event: WaIncomingCallEvent) => {
+      try {
+        const callData = (event as any).call || event;
+        const fromRaw = callData.callerPnJid || callData.callCreatorJid || callData.senderLidJid || '';
+        const userId = await this.wa.resolveId(fromRaw);
+        const chatId = callData.groupJid
+          ? normalizeJid(callData.groupJid)
+          : userId;
 
-      for (const id of list || []) {
-        const resolved = await this.wa.resolveId(id);
-        if (resolved) users.push(resolved);
+        const statusStr = String(callData.type || callData.payloadTag || 'ringing').toLowerCase();
+        const status = CALL_STATUS[statusStr] || CallStatus.Ringing;
+        const user = (await this.toUser(userId)) || User.fromJSON({ id: userId });
+
+        const call = new Call(
+          callData.callId || String(Date.now()),
+          chatId || userId,
+          user,
+          status,
+          {
+            date: new Date(),
+            isVideo: !!callData.isVideo,
+            offline: false,
+            latencyMs: 1,
+            isGroup: Boolean(callData.groupJid),
+            extra: {
+              from: fromRaw,
+              chatId,
+              groupJid: callData.groupJid,
+              callCreatorJid: callData.callCreatorJid,
+            },
+          },
+        );
+
+        this.wa.emit('call', call);
+      } catch (err) {
+        this.wa.emit('error', err as any);
       }
-
-      this.wa.emit('blocklist', { action, users });
-    };
-
-    this.wa.sock.ev.on('blocklist.set', ({ blocklist }) => {
-      emitBlocklist('set', blocklist).catch((err) => this.wa.emit('error', err));
-    });
-
-    this.wa.sock.ev.on('blocklist.update', ({ blocklist, type }) => {
-      emitBlocklist(type, blocklist).catch((err) => this.wa.emit('error', err));
     });
   }
 
-  public configCall() {
-    this.wa.sock.ev.on('call', async (events: WACallEvent[]) => {
-      for (const event of events || []) {
-        try {
-          this.wa.registerIdentity(event.from, event.callerPn, true);
-
-          const userId = await this.wa.resolveId(event.callerPn || event.from);
-          const chatId = event.isGroup && event.groupJid
-            ? normalizeJid(event.groupJid)
-            : await this.wa.resolveId(event.callerPn || event.chatId || event.from);
-
-          const status = CALL_STATUS[event.status] || CallStatus.Ringing;
-
-          const user = (await this.toUser(userId)) || userId;
-
-          const call = new Call(event.id, chatId || userId, user, status, {
-            date: event.date || new Date(),
-            isVideo: !!event.isVideo,
-            offline: !!event.offline,
-            latencyMs: event.latencyMs || 1,
-            isGroup: !!event.isGroup,
-            extra: { from: event.from, chatId: event.chatId, groupJid: event.groupJid },
-          });
-
-          this.wa.emit('call', call);
-        } catch (err) {
-          this.wa.emit('error', err);
+  public configBlocklist(zapo: WaClient): void {
+    zapo.on('blocklist', async (event: WaBlocklistResult) => {
+      try {
+        const users: string[] = [];
+        for (const jid of event.jids || []) {
+          const resolved = await this.wa.resolveId(jid);
+          if (resolved) users.push(resolved);
         }
+        this.wa.emit('blocklist', { action: 'set', users });
+      } catch (err) {
+        this.wa.emit('error', err as any);
       }
+    });
+  }
+
+  /** Confirmações de entrega/leitura → evento `receipt`. */
+  public configReceipts(zapo: WaClient): void {
+    zapo.on('receipt', async (event: WaIncomingReceiptEvent) => {
+      // Evento de alto volume: só resolve IDs se alguém estiver ouvindo
+      if (!this.wa.hasListeners('receipt')) return;
+      try {
+        // Recibos de outro dispositivo da própria conta trazem o chat em `recipient`
+        const rawChat = event.fromSelfDevice ? event.recipientJid || event.chatJid : event.chatJid;
+        const chatId = await this.wa.resolveId(rawChat || '');
+        if (!chatId) return;
+
+        const userId = event.fromSelfDevice
+          ? this.wa.id
+          : await this.wa.resolveId(event.participantJid || event.chatJid || '');
+
+        this.wa.emit('receipt', {
+          chatId,
+          userId: userId || chatId,
+          messageIds: [...(event.messageIds || (event.stanzaId ? [event.stanzaId] : []))],
+          type: event.status,
+          timestamp: this.stanzaTimestamp(event),
+          fromSelfDevice: !!event.fromSelfDevice,
+        });
+      } catch (err) {
+        this.wa.reportError('falha ao processar recibo', err);
+      }
+    });
+  }
+
+  /** Digitando/gravando → evento `chatstate` (requer `subscribePresence`). */
+  public configChatstate(zapo: WaClient): void {
+    zapo.on('chatstate', async (event: WaIncomingChatstateEvent) => {
+      if (!this.wa.hasListeners('chatstate')) return;
+      try {
+        const chatId = await this.wa.resolveId(event.chatJid || '');
+        if (!chatId) return;
+
+        const user = await this.toUser(event.participantJid || event.chatJid);
+        if (!user || user.id === this.wa.id) return;
+
+        // O protocolo só tem `composing`/`paused`; gravação é `composing` com mídia de áudio
+        const state: ChatStateValue =
+          event.state === 'paused' ? 'paused' : event.media === 'audio' ? 'recording' : 'composing';
+
+        this.wa.emit('chatstate', { chat: await this.toChat(chatId), user, state });
+      } catch (err) {
+        this.wa.reportError('falha ao processar chatstate', err);
+      }
+    });
+  }
+
+  /** Mensagens sem conteúdo, mensagens de protocolo e cache das mensagens enviadas. */
+  public configMessageExtras(zapo: WaClient): void {
+    zapo.on('message_unavailable', async (event: WaIncomingUnavailableMessageEvent) => {
+      try {
+        const key = event?.key;
+        this.wa.logger.warn('mensagem recebida sem conteúdo', {
+          id: key?.id,
+          chat: key?.remoteJid,
+          kind: event?.kind,
+          resendRequested: !!event?.resendRequested,
+        });
+        if (!key?.remoteJid || !this.wa.hasListeners('message-unavailable')) return;
+
+        if (key.remoteJidAlt) this.wa.registerIdentity(key.remoteJid, key.remoteJidAlt);
+        if (key.participantAlt) this.wa.registerIdentity(key.participant, key.participantAlt);
+
+        const chatId = await this.wa.resolveId(key.remoteJid);
+        if (!chatId) return;
+        const userId = key.fromMe ? this.wa.id : await this.wa.resolveId(key.participant || key.remoteJid);
+        const user = (await this.toUser(userId)) || User.fromJSON({ id: userId });
+        if (!key.fromMe && event.pushName) user.name = event.pushName;
+
+        this.wa.emit('message-unavailable', {
+          chat: await this.toChat(chatId),
+          user,
+          id: key.id || '',
+          reason: event.kind,
+          resendRequested: !!event.resendRequested,
+          timestamp: this.stanzaTimestamp(event, event.timestampSeconds),
+        });
+      } catch (err) {
+        this.wa.reportError('falha ao processar mensagem indisponível', err);
+      }
+    });
+
+    // Apagadas (REVOKE) e editadas (MESSAGE_EDIT) já chegam pelo evento `message`, que o Zapo
+    // emite antes deste para o mesmo stanza (ConvertWAMessage marca isDeleted/isEdited).
+    // Por isso aqui só repassamos o protocolMessage bruto, sem eventos de revoke/edit duplicados.
+    zapo.on('message_protocol', async (event: WaIncomingProtocolMessageEvent) => {
+      if (!this.wa.hasListeners('message-protocol')) return;
+      try {
+        const key = event?.key;
+        if (!key?.remoteJid || key.remoteJid === 'status@broadcast') return;
+
+        const chatId = await this.wa.resolveId(key.remoteJid);
+        const userId = key.fromMe ? this.wa.id : await this.wa.resolveId(key.participant || key.remoteJid);
+        const protocolMessage = event.protocolMessage;
+        const type = Number(protocolMessage?.type ?? -1);
+
+        this.wa.emit('message-protocol', {
+          chatId,
+          userId,
+          id: key.id || '',
+          targetId: protocolMessage?.key?.id || undefined,
+          type,
+          typeName: (proto.Message.ProtocolMessage.Type as any)[type] || undefined,
+          fromMe: !!key.fromMe,
+          protocolMessage,
+        });
+      } catch (err) {
+        this.wa.reportError('falha ao processar protocolMessage', err);
+      }
+    });
+
+    // Guarda as mensagens enviadas por este cliente para editar/encaminhar depois (original())
+    zapo.on('message_send', (event) => {
+      try {
+        const message: any = event?.message;
+        if (!event?.id || !event.to || !message || event.to === 'status@broadcast') return;
+        if (message.protocolMessage || message.reactionMessage || message.pollUpdateMessage) return;
+        this.wa.cacheWAMessage({ key: { remoteJid: event.to, id: event.id, fromMe: true }, message });
+      } catch (err) {
+        this.wa.reportError('falha ao guardar mensagem enviada no cache', err);
+      }
+    });
+  }
+
+  /** Foto de perfil de contato/grupo alterada → evento `picture`. */
+  public configPicture(zapo: WaClient): void {
+    zapo.on('picture', async (event: WaPictureEvent) => {
+      if (!this.wa.hasListeners('picture')) return;
+      try {
+        const id = await this.wa.resolveId(event.targetJid || event.chatJid || '');
+        if (!id) return;
+
+        this.wa.emit('picture', {
+          id,
+          action: event.action,
+          authorId: event.authorJid ? await this.wa.resolveId(event.authorJid) : undefined,
+          pictureId: event.pictureId,
+          timestamp: this.stanzaTimestamp(event, event.timestampSeconds),
+          raw: event,
+        });
+      } catch (err) {
+        this.wa.reportError('falha ao processar alteração de foto', err);
+      }
+    });
+  }
+
+  public configExtraEvents(zapo: WaClient): void {
+    zapo.on('stream_failure', (event) => {
+      this.wa.emit('error', new Error(`WhatsApp stream failure: ${event.failureMessage || event.failureReason || 'unknown'}`));
+    });
+
+    zapo.on('stanza_error', (event) => {
+      this.wa.emit('error', new Error(`WhatsApp stanza error: ${event.code} - ${event.text || ''}`));
+    });
+
+    // Eventos futuros expostos pelo ZapoJS
+    zapo.on('mex_notification', (event) => {
+      this.wa.emit('mex' as any, event);
+    });
+
+    zapo.on('newsletter', (event) => {
+      this.wa.emit('newsletter' as any, event);
+    });
+
+    zapo.on('own_username', (event) => {
+      this.wa.emit('own-username' as any, event);
+    });
+
+    zapo.on('privacy', (event) => {
+      this.wa.emit('privacy' as any, event);
+    });
+
+    zapo.on('offline_resume', (event) => {
+      this.wa.emit('offline-resume' as any, event);
     });
   }
 }

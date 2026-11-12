@@ -16,11 +16,18 @@ import { Media } from '../messages/MediaMessage';
 import Message from '../messages/Message';
 
 import TelegramSendingController from './TelegramSendingController';
+import TelegramToRompotConverter from './TelegramToRompotConverter';
 import { TelegramUtils } from './TelegramUtils';
 import TelegramEvents from './TelegramEvents';
 import TelegramAuth from './TelegramAuth';
 
 import { verifyIsEquals } from '../utils/Generic';
+import {
+  type MediaDownloadOptions,
+  createMediaTooLargeError,
+  getMediaMaxBytes,
+  toMediaNumber,
+} from '../utils/MediaUtils';
 import Call from '../models/Call';
 
 export default class TelegramBot extends BotEvents implements IBot {
@@ -136,18 +143,47 @@ export default class TelegramBot extends BotEvents implements IBot {
   }
 
   public async readMessage(message: Message): Promise<void> {
-    //TODO: Read message
+    const chat = await this.getChat(message.chat);
+    if (chat && chat.unreadCount) {
+      await this.updateChat({ id: chat.id, unreadCount: Math.max(0, chat.unreadCount - 1) });
+    }
   }
 
   public async removeMessage(message: Message): Promise<void> {
-    //TODO: Remove message
+    await this.deleteMessage(message);
+  }
+
+  public async pinMessage(message: Message, _duration?: number): Promise<void> {
+    await this.bot.pinChatMessage(Number(message.chat.id), Number(message.id));
+  }
+
+  public async unpinMessage(message: Message): Promise<void> {
+    await this.bot.unpinChatMessage(Number(message.chat.id), {
+      message_id: Number(message.id),
+    } as any);
+  }
+
+  public async forwardMessage(chat: Chat, message: Message): Promise<Message> {
+    const forwarded = await this.bot.forwardMessage(
+      Number(chat.id),
+      Number(message.chat.id),
+      Number(message.id),
+    );
+    return await new TelegramToRompotConverter(forwarded).convert();
   }
 
   public async deleteMessage(message: Message): Promise<void> {
     await this.bot.deleteMessage(Number(message.chat.id), Number(message.id));
   }
 
-  public async downloadStreamMessage(media: Media): Promise<Buffer> {
+  /**
+   * Baixa a mídia para a memória.
+   * @param options Opcional: `maxBytes` (sem valor = sem limite), `signal` e `timeoutMs`.
+   */
+  public async downloadStreamMessage(
+    media: Media,
+    options?: MediaDownloadOptions,
+  ): Promise<Buffer> {
     if (
       !media?.stream ||
       typeof media.stream != 'object' ||
@@ -156,9 +192,49 @@ export default class TelegramBot extends BotEvents implements IBot {
       return Buffer.from('');
     }
 
+    TelegramBot.assertDeclaredMediaSize(media, options);
+
     const fileUrl = await this.bot.getFileLink(media.stream.file_id);
 
-    return await TelegramUtils.downloadFileFromURL(fileUrl);
+    return await TelegramUtils.downloadFileFromURL(fileUrl, options);
+  }
+
+  /**
+   * Baixa a mídia direto para `filePath`, em stream (sem carregar tudo em memória).
+   * Aplica `maxBytes` pelo tamanho declarado, pelo Content-Length e pelos bytes contados.
+   * Em caso de falha o arquivo parcial é apagado.
+   */
+  public async downloadMediaToFile(
+    media: Media,
+    filePath: string,
+    options?: MediaDownloadOptions,
+  ): Promise<void> {
+    if (
+      !media?.stream ||
+      typeof media.stream != 'object' ||
+      !media.stream.file_id
+    ) {
+      throw new Error('A mensagem não tem um arquivo do Telegram para baixar.');
+    }
+
+    TelegramBot.assertDeclaredMediaSize(media, options);
+
+    const fileUrl = await this.bot.getFileLink(media.stream.file_id);
+
+    await TelegramUtils.downloadFileFromURLToFile(fileUrl, filePath, options);
+  }
+
+  /** Falha cedo quando o Telegram declara (`file_size`) um tamanho acima de `maxBytes`. */
+  private static assertDeclaredMediaSize(
+    media: Media,
+    options?: MediaDownloadOptions,
+  ): void {
+    const maxBytes = getMediaMaxBytes(options);
+    const size = toMediaNumber(media?.stream?.file_size);
+
+    if (maxBytes && size > maxBytes) {
+      throw createMediaTooLargeError(maxBytes, size);
+    }
   }
 
   public async getBotName(): Promise<string> {
@@ -276,11 +352,30 @@ export default class TelegramBot extends BotEvents implements IBot {
   }
 
   public async demoteUserInChat(chat: Chat, user: User): Promise<void> {
-    //TODO: Demote user in chat
+    await this.bot.promoteChatMember(Number(chat.id), Number(user.id), {
+      can_change_info: false,
+      can_post_messages: false,
+      can_edit_messages: false,
+      can_delete_messages: false,
+      can_invite_users: false,
+      can_restrict_members: false,
+      can_pin_messages: false,
+      can_promote_members: false,
+    });
   }
 
   public async changeChatStatus(chat: Chat, status: ChatStatus): Promise<void> {
-    //TODO: Change chat status
+    const actionMap: Record<ChatStatus, TelegramBotAPI.ChatAction> = {
+      [ChatStatus.Typing]: 'typing',
+      [ChatStatus.Recording]: 'record_voice',
+      [ChatStatus.Paused]: 'typing',
+      [ChatStatus.Online]: 'typing',
+      [ChatStatus.Offline]: 'typing',
+    };
+    const action = actionMap[status] || 'typing';
+    try {
+      await this.bot.sendChatAction(Number(chat.id), action);
+    } catch {}
   }
 
   public async getChatUsers(chat: Chat): Promise<string[]> {
@@ -429,11 +524,15 @@ export default class TelegramBot extends BotEvents implements IBot {
   }
 
   public async unblockUser(user: User): Promise<void> {
-    //TODO: Unblock user
+    try {
+      await this.bot.unbanChatMember(Number(user.id), Number(user.id));
+    } catch {}
   }
 
   public async blockUser(user: User): Promise<void> {
-    //TODO: Block user
+    try {
+      await this.bot.banChatMember(Number(user.id), Number(user.id));
+    } catch {}
   }
 
   public async getUserName(user: User): Promise<string> {

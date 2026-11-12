@@ -7,6 +7,12 @@ export type MessageHandlerConfig = {
   stopRead: boolean;
   patterns: Array<(message: Message) => boolean>;
   resolve(message: Message): void;
+  /**
+   * Cancela a espera: ela sai da fila e a promessa de `addMessage` rejeita com o motivo do sinal.
+   * Sem isso, uma espera abandonada (timeout de quem chamou) ficava na fila e engolia a próxima
+   * mensagem do chat.
+   */
+  signal?: AbortSignal;
 };
 
 /**
@@ -40,13 +46,38 @@ export default class MessageHandler {
       this.messages[chatId] = [];
     }
 
-    return new Promise((resolve) => {
-      this.messages[chatId].push({
+    return new Promise((resolve, reject) => {
+      const signal = config.signal;
+      if (signal?.aborted) {
+        reject(signal.reason ?? new Error('Espera cancelada'));
+        return;
+      }
+
+      const entry: MessageHandlerConfig = {
         stopRead: !!config.stopRead,
         patterns: config.patterns || [],
-        resolve,
-      });
+        resolve: (message: Message) => {
+          signal?.removeEventListener('abort', onAbort);
+          resolve(message);
+        },
+      };
+      const onAbort = () => {
+        this.removeMessage(chatId, entry);
+        reject(signal?.reason ?? new Error('Espera cancelada'));
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
+
+      this.messages[chatId].push(entry);
     });
+  }
+
+  /** Tira uma espera da fila do chat (e o chat do registro, se ficar vazio). */
+  public removeMessage(chatId: string, entry: MessageHandlerConfig): void {
+    const waiting = this.messages[chatId];
+    if (!waiting) return;
+    const remaining = waiting.filter((item) => item !== entry);
+    if (remaining.length) this.messages[chatId] = remaining;
+    else delete this.messages[chatId];
   }
 
   /**
@@ -61,12 +92,14 @@ export default class MessageHandler {
 
     let stopRead: boolean = false;
 
-    for (const msg of this.messages[chatId]) {
-      if (msg.patterns.some((ptn) => ptn(message))) return false;
+    // Cópia: resolver uma espera altera a lista.
+    for (const msg of [...this.messages[chatId]]) {
+      // Esta espera ignora a mensagem (ex.: é de outro usuário): passa para a próxima.
+      // Antes era `return false`, e a espera de um usuário num grupo travava as dos outros.
+      if (msg.patterns.some((ptn) => ptn(message))) continue;
 
+      this.removeMessage(chatId, msg);
       msg.resolve(message);
-
-      this.messages[chatId] = this.messages[chatId].filter((m) => msg != m);
 
       stopRead = stopRead || msg.stopRead;
     }

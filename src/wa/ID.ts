@@ -1,18 +1,15 @@
 import {
-  isHostedLidUser,
-  isHostedPnUser,
-  isJidBroadcast,
-  isJidGroup,
-  isJidNewsletter,
-  isLidUser,
-  isPnUser,
-  jidNormalizedUser,
-} from 'baileys';
+  isLidJid as zapoIsLid,
+  isGroupJid as zapoIsGroup,
+  isNewsletterJid as zapoIsNewsletter,
+  isBroadcastJid as zapoIsBroadcast,
+  toUserJid,
+} from 'zapo-js';
 
 import type { LIDMapper } from './LIDMapper';
 
 /**
- * Regras de identificação usadas pelo Rompot no WhatsApp (Baileys 7+):
+ * Regras de identificação usadas pelo Rompot no WhatsApp:
  *
  * - Uma mesma pessoa tem dois JIDs: o PN (`5511999999999@s.whatsapp.net`) e o LID (`123456789@lid`).
  * - O Rompot usa **um único ID canônico** por pessoa: o PN quando o número é conhecido,
@@ -22,12 +19,15 @@ import type { LIDMapper } from './LIDMapper';
 
 /** O ID é um LID (`@lid` ou `@hosted.lid`). */
 export function isLidJid(id?: string | null): boolean {
-  return !!id && !!(isLidUser(id) || isHostedLidUser(id));
+  if (!id || typeof id !== 'string') return false;
+  return id.endsWith('@lid') || id.endsWith('@hosted.lid') || zapoIsLid(id);
 }
 
 /** O ID é um PN, ou seja, baseado em número de telefone (`@s.whatsapp.net` ou `@hosted`). */
 export function isPnJid(id?: string | null): boolean {
-  return !!id && !!(isPnUser(id) || isHostedPnUser(id));
+  if (!id || typeof id !== 'string') return false;
+  const bare = normalizeJid(id);
+  return bare.endsWith('@s.whatsapp.net') || bare.endsWith('@hosted');
 }
 
 /** O ID representa uma pessoa (PN ou LID), e não um grupo, canal ou lista. */
@@ -37,17 +37,20 @@ export function isUserJid(id?: string | null): boolean {
 
 /** O ID é de um grupo (`@g.us`). */
 export function isGroupJid(id?: string | null): boolean {
-  return !!id && !!isJidGroup(id);
+  if (!id || typeof id !== 'string') return false;
+  return id.endsWith('@g.us') || zapoIsGroup(id);
 }
 
 /** O ID é de um canal (`@newsletter`). */
 export function isNewsletterJid(id?: string | null): boolean {
-  return !!id && !!isJidNewsletter(id);
+  if (!id || typeof id !== 'string') return false;
+  return id.endsWith('@newsletter') || zapoIsNewsletter(id);
 }
 
 /** O ID é de uma lista de transmissão ou do status (`@broadcast`). */
 export function isBroadcastJid(id?: string | null): boolean {
-  return !!id && !!isJidBroadcast(id);
+  if (!id || typeof id !== 'string') return false;
+  return id.endsWith('@broadcast') || zapoIsBroadcast(id);
 }
 
 /**
@@ -68,11 +71,17 @@ export function normalizeJid(id?: string | null): string {
     return `${digits}@s.whatsapp.net`;
   }
 
+  // Remove o sufixo de dispositivo e converte @c.us para @s.whatsapp.net
+  const cleaned = value.replace(/@c\.us$/, '@s.whatsapp.net');
   try {
-    return jidNormalizedUser(value) || '';
+    const normalized = toUserJid(cleaned);
+    if (normalized) return normalized;
   } catch {
-    return '';
+    // fallback se toUserJid falhar
   }
+
+  // Fallback regex: remove :device da parte do usuário
+  return cleaned.replace(/:[^@]+@/, '@');
 }
 
 /**
@@ -81,13 +90,12 @@ export function normalizeJid(id?: string | null): string {
  */
 export function extractLID(id: string): string | null {
   const normalized = normalizeJid(id);
-
   return isLidJid(normalized) ? normalized : null;
 }
 
 /**
  * Extrai o LID de uma chave de mensagem, considerando participant (grupos) e remoteJid,
- * além dos campos alternativos `participantAlt` e `remoteJidAlt` do Baileys 7.
+ * além dos campos alternativos `participantAlt` e `remoteJidAlt`.
  */
 export function getLIDFromMessage(key: {
   remoteJid?: string | null;
@@ -185,5 +193,5 @@ export function getID(id: string): string {
 
   if (!id.includes('@')) return normalizeJid(id) || `${id}@s.whatsapp.net`;
 
-  return id;
+  return normalizeJid(id) || id;
 }

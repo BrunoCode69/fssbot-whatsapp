@@ -22,6 +22,12 @@ export default class ReactionMessage extends Message {
     // Define o ID da mensagem com base no parâmetro 'receive'.
     this.id = typeof receive === "string" ? receive : typeof receive == "object" ? receive?.id || "" : "";
 
+    if (typeof receive === "object" && receive !== null) {
+      if (receive.user?.id) this.user = receive.user;
+      this.fromMe = !!receive.fromMe;
+      if (receive.extra?.key) this.extra.key = receive.extra.key;
+    }
+
     injectJSON(others, this);
   }
 

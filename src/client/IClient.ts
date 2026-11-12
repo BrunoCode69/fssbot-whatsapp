@@ -2,6 +2,7 @@ import ConnectionConfig from "../configs/ConnectionConfig";
 
 import Message from "../messages/Message";
 import MediaMessage from "../messages/MediaMessage";
+import type { MediaDownloadOptions } from "../utils/MediaUtils";
 
 import ChatStatus from "../modules/chat/ChatStatus";
 import Chat from "../modules/chat/Chat";
@@ -154,9 +155,26 @@ export default interface IClient<Bot extends IBot = IBot> extends ClientEvents {
   /**
    * Retorna a stream da mídia
    * @param message Mídia que será baixada
+   * @param options Limite de bytes (`maxBytes`), cancelamento e tempo máximo (opcional)
    * @returns Stream da mídia
    */
-  downloadStreamMessage(message: MediaMessage): Promise<Buffer>;
+  downloadStreamMessage(
+    message: MediaMessage,
+    options?: MediaDownloadOptions
+  ): Promise<Buffer>;
+
+  /**
+   * Baixa a mídia direto para um arquivo, em stream (sem carregar tudo em memória).
+   * Em caso de falha, o arquivo parcial é apagado. Falha com erro claro se o bot não suportar.
+   * @param message Mídia que será baixada
+   * @param filePath Caminho do arquivo de destino
+   * @param options Limite de bytes (`maxBytes`), cancelamento e tempo máximo (opcional)
+   */
+  downloadMediaToFile(
+    message: MediaMessage,
+    filePath: string,
+    options?: MediaDownloadOptions
+  ): Promise<void>;
 
   /** @returns Retorna o nome do bot */
   getBotName(): Promise<string>;

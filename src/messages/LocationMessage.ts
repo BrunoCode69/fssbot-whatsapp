@@ -17,6 +17,15 @@ export default class LocationMessage extends Message {
   /** A longitude da localização. */
   public longitude: number;
 
+  /** Nome do local (opcional). */
+  public name: string = "";
+
+  /** Endereço do local (opcional). */
+  public address: string = "";
+
+  /** URL do mapa (opcional). */
+  public url: string = "";
+
   /**
    * Cria uma nova instância de LocationMessage.
    * @param latitude - A latitude da localização (padrão é 0).
@@ -41,13 +50,41 @@ export default class LocationMessage extends Message {
   public setLocation(latitude: number, longitude: number) {
     this.latitude = latitude;
     this.longitude = longitude;
+    return this;
+  }
+
+  /**
+   * Define o nome do local.
+   * @param name - Nome do local.
+   */
+  public setName(name: string) {
+    this.name = name;
+    return this;
+  }
+
+  /**
+   * Define o endereço do local.
+   * @param address - Endereço textual.
+   */
+  public setAddress(address: string) {
+    this.address = address;
+    return this;
+  }
+
+  /**
+   * Define a URL de mapa ou referência.
+   * @param url - URL do mapa.
+   */
+  public setUrl(url: string) {
+    this.url = url;
+    return this;
   }
 
   /**
    * @returns O endereço da localização
    */
   public getAddress() {
-    return AddressService.getByLocation(this.latitude, this.longitude);
+    return this.address || AddressService.getByLocation(this.latitude, this.longitude);
   }
 
   /**

@@ -64,6 +64,11 @@ export type ClientEventsMap = {
   stop: {
     /** O cliente se desconectou */
     isLogout: boolean;
+    /**
+     * Por que parou, quando não foi logout. `reconnect_failed`: as tentativas de reconexão
+     * (`maxReconnectTimes`) acabaram e o cliente não tenta mais sozinho.
+     */
+    reason?: 'reconnect_failed';
   };
 
   /**
