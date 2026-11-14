@@ -10,7 +10,7 @@ import { getPollCreationContent, getPollCreatorJid, getPollVoterId, getPollVoteC
 import ListMessage from '../src/messages/ListMessage';
 import PollMessage from '../src/messages/PollMessage';
 import Message from '../src/messages/Message';
-import { BufferJSON } from 'baileys';
+import { BufferJSON } from '../src/wa/Auth';
 import ButtonMessage from '../src/messages/ButtonMessage';
 import { createButtonSendOptions, createInlineKeyboard } from '../src/telegram/inline-keyboard';
 
