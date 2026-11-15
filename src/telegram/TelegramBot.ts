@@ -562,28 +562,38 @@ export default class TelegramBot extends BotEvents implements IBot {
     user: User,
     lowQuality?: boolean,
   ): Promise<Buffer> {
-    const fileUrl = await this.getUserProfileUrl(user, lowQuality);
-
-    if (!fileUrl) {
+    try {
+      const fileUrl = await this.getUserProfileUrl(user, lowQuality);
+      if (!fileUrl) {
+        return Buffer.from('');
+      }
+      return await TelegramUtils.downloadFileFromURL(fileUrl);
+    } catch {
       return Buffer.from('');
     }
-
-    return await TelegramUtils.downloadFileFromURL(fileUrl);
   }
 
   public async getUserProfileUrl(
     user: User,
     lowQuality?: boolean,
   ): Promise<string> {
-    const profile = await this.bot.getUserProfilePhotos(Number(user.id));
-
-    const photo = profile.photos?.shift()?.shift();
-
-    if (!photo) {
+    try {
+      const profile = await this.bot.getUserProfilePhotos(Number(user.id));
+      if (!profile?.photos || profile.photos.length === 0) {
+        return '';
+      }
+      const photoVariants = profile.photos[0];
+      if (!photoVariants || photoVariants.length === 0) {
+        return '';
+      }
+      const photo = lowQuality ? photoVariants[0] : photoVariants[photoVariants.length - 1];
+      if (!photo?.file_id) {
+        return '';
+      }
+      return (await this.bot.getFileLink(photo.file_id)) || '';
+    } catch {
       return '';
     }
-
-    return await this.bot.getFileLink(photo.file_id);
   }
 
   public async setUserProfile(user: User, profile: Buffer): Promise<void> {
