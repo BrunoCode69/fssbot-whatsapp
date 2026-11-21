@@ -35,6 +35,10 @@ export namespace TelegramUtils {
       return `${data.first_name}`;
     }
 
+    if ((data as any).title) {
+      return `${(data as any).title}`;
+    }
+
     if (data.username) {
       return `${data.username}`;
     }
