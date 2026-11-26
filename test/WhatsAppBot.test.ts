@@ -7,6 +7,9 @@ import { createReactionMessageData } from '../src/wa/reaction-message-data';
 import { createInteractiveListPayload } from '../src/wa/interactive-list-payload';
 import { extractInteractiveListSelection } from '../src/wa/list-selection';
 import { getPollCreationContent, getPollCreatorJid, getPollVoterId, getPollVoteChange } from '../src/wa/poll-content';
+import ContactMessage from '../src/messages/ContactMessage';
+import AudioMessage from '../src/messages/AudioMessage';
+import ConvertToWAMessage, { normalizeWhatsAppAudioMimetype } from '../src/wa/ConvertToWAMessage';
 import ListMessage from '../src/messages/ListMessage';
 import PollMessage from '../src/messages/PollMessage';
 import Message from '../src/messages/Message';
@@ -242,6 +245,36 @@ describe('WhatsApp poll creation variants', () => {
   test('detects an added option when a voter switches their single-choice vote', () => {
     expect(getPollVoteChange(['Hello'], ['Hey'])).toEqual({ action: 'add', option: 'Hey' });
     expect(getPollVoteChange(['Hello'], [])).toEqual({ action: 'remove', option: 'Hello' });
+  });
+});
+
+describe('WhatsApp AudioMessage conversion', () => {
+  test('never forwards video/* mimetypes to Zapo audio payloads', () => {
+    expect(normalizeWhatsAppAudioMimetype('video/mp4', false)).toBe('audio/mp4');
+    expect(normalizeWhatsAppAudioMimetype('video/x-m4v', false)).toBe('audio/mp4');
+    expect(normalizeWhatsAppAudioMimetype('video/webm', false)).toBe('audio/webm');
+    expect(normalizeWhatsAppAudioMimetype('application/octet-stream', false)).toBe('audio/mp4');
+    expect(normalizeWhatsAppAudioMimetype('audio/ogg', true)).toBe('audio/ogg; codecs=opus');
+    expect(normalizeWhatsAppAudioMimetype('audio/mpeg', false)).toBe('audio/mpeg');
+  });
+
+  test('converts AudioMessage with mismatched video/mp4 mimetype to audio/mp4 in ConvertToWAMessage', async () => {
+    const fakeBot = {
+      resolveId: async (jid: string) => jid,
+    } as any;
+    const msg = new AudioMessage('5511999999999@s.whatsapp.net', Buffer.from('audio-bytes'), {
+      mimetype: 'video/mp4',
+      isPTT: false,
+      duration: 185,
+    });
+
+    const converted = await new ConvertToWAMessage(fakeBot, msg).refactory();
+    expect(converted.waMessage).toMatchObject({
+      type: 'audio',
+      ptt: false,
+      mimetype: 'audio/mp4',
+      seconds: 185,
+    });
   });
 });
 

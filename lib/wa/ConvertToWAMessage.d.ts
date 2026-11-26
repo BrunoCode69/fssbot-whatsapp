@@ -8,6 +8,12 @@ import ButtonMessage from '../messages/ButtonMessage';
 import MediaMessage from '../messages/MediaMessage';
 import PollMessage from '../messages/PollMessage';
 import type WhatsAppBot from './WhatsAppBot';
+/**
+ * Normaliza o mimetype de `AudioMessage` antes de enviar pelo ZapoJS/WhatsApp,
+ * garantindo que contêineres MP4/M4A marcados por engano como `video/*` ou genéricos
+ * não quebrem a entrega do `audioMessage` no WhatsApp.
+ */
+export declare function normalizeWhatsAppAudioMimetype(mimetype?: string, isPTT?: boolean): string;
 export default class ConvertToWAMessage {
     message: Message;
     bot: WhatsAppBot;

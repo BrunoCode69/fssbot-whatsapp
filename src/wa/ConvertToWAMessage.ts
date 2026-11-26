@@ -18,6 +18,29 @@ import { createReactionKey } from './reaction-key';
 import { createInteractiveListPayload } from './interactive-list-payload';
 import type WhatsAppBot from './WhatsAppBot';
 
+/**
+ * Normaliza o mimetype de `AudioMessage` antes de enviar pelo ZapoJS/WhatsApp,
+ * garantindo que contêineres MP4/M4A marcados por engano como `video/*` ou genéricos
+ * não quebrem a entrega do `audioMessage` no WhatsApp.
+ */
+export function normalizeWhatsAppAudioMimetype(mimetype?: string, isPTT: boolean = false): string {
+  const raw = String(mimetype || '').trim();
+  const base = raw.split(';')[0]!.trim().toLowerCase();
+  if (!base || base === 'application/octet-stream') {
+    return isPTT ? 'audio/ogg; codecs=opus' : 'audio/mp4';
+  }
+  if (base === 'video/mp4' || base === 'video/x-m4v' || base === 'video/3gpp') {
+    return 'audio/mp4';
+  }
+  if (base === 'video/webm') {
+    return 'audio/webm';
+  }
+  if (base === 'audio/ogg' && isPTT) {
+    return 'audio/ogg; codecs=opus';
+  }
+  return raw;
+}
+
 export default class ConvertToWAMessage {
   public message: Message;
   public bot: WhatsAppBot;
@@ -218,7 +241,7 @@ export default class ConvertToWAMessage {
         type: 'audio',
         media,
         ptt: !!message.isPTT,
-        mimetype: message.mimetype || 'audio/ogg; codecs=opus',
+        mimetype: normalizeWhatsAppAudioMimetype(message.mimetype, !!message.isPTT),
         ...ConvertToWAMessage.getMediaFields(message, message.duration),
       };
     } else if (
