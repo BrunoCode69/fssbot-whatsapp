@@ -175,12 +175,53 @@ export function generateWAMessageFromContent(
   };
 }
 
-export async function sendInteractiveMessage(sock: any, jid: string, content: any): Promise<any> {
+/**
+ * Converte payloads de conveniência (`{ text, title, subtitle, footer, interactiveButtons }`)
+ * no formato `proto.Message.interactiveMessage` aceito nativamente pelo ZapoJS (sem injetar nó `bot`).
+ */
+export function toInteractiveProtoMessage(content: any): any {
+  if (!content || typeof content !== 'object') return content;
+  if (content.interactiveMessage || !Array.isArray(content.interactiveButtons)) {
+    return content;
+  }
+
+  const interactiveMessage: Record<string, any> = {
+    nativeFlowMessage: {
+      buttons: content.interactiveButtons.map((btn: any) => ({
+        name: btn?.name || 'quick_reply',
+        buttonParamsJson: btn?.buttonParamsJson,
+      })),
+    },
+  };
+
+  if (content.title || content.subtitle) {
+    interactiveMessage.header = { title: content.title || content.subtitle || '' };
+  }
+  if (content.text) {
+    interactiveMessage.body = { text: content.text };
+  }
+  if (content.footer) {
+    interactiveMessage.footer = { text: content.footer };
+  }
+
+  const normalized = { ...content };
+  delete normalized.__useBaileysHelper;
+  delete normalized.interactiveButtons;
+  delete normalized.title;
+  delete normalized.subtitle;
+  delete normalized.text;
+  delete normalized.footer;
+
+  return { ...normalized, interactiveMessage };
+}
+
+export async function sendInteractiveMessage(sock: any, jid: string, content: any, options?: any): Promise<any> {
+  const payload = toInteractiveProtoMessage(content);
   if (typeof sock?.sendMessage === 'function') {
-    return await sock.sendMessage(jid, content);
+    return await sock.sendMessage(jid, payload, options);
   }
   if (sock?.message && typeof sock.message.send === 'function') {
-    return await sock.message.send(jid, content);
+    return await sock.message.send(jid, payload, options);
   }
   throw new Error('Socket not initialized for interactive message send');
 }
@@ -1967,14 +2008,15 @@ export default class WhatsAppBot extends BotEvents implements IBot {
       throw new Error(`Invalid chat ID: ${content?.chat?.id}`);
     }
 
-    // Se a mensagem usa baileys_helper
+    // Se a mensagem usa formato interativo (botões/lista)
     if (waMSG.waMessage.__useBaileysHelper) {
       delete waMSG.waMessage.__useBaileysHelper;
 
       const sentInteractiveMessage = await sendInteractiveMessage(
         this.sock,
         chatId,
-        waMSG.waMessage
+        waMSG.waMessage,
+        waMSG.options,
       );
 
       this.cacheWAMessage(sentInteractiveMessage);

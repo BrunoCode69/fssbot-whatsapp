@@ -492,3 +492,63 @@ describe('WhatsApp quoted media & mention conversion', () => {
   });
 });
 
+describe('WhatsApp interactive buttons & lists for ZapoJS (PV and groups)', () => {
+  test('converts ButtonMessage interactiveButtons to ZapoJS interactiveMessage proto and preserves quote options', async () => {
+    const { resolveOutboundMessageAttrs } = require('../node_modules/zapo-js/dist/message/encode/content.js');
+    const { buildButtonAddonNode } = require('../node_modules/zapo-js/dist/transport/node/builders/message.js');
+    const ButtonMessage = require('../src/messages/ButtonMessage').default;
+    const { sendInteractiveMessage } = require('../src/wa/WhatsAppBot');
+
+    const sentCalls: any[] = [];
+    const fakeBot = {
+      id: '5511000000000@s.whatsapp.net',
+      resolveId: async (jid: string) => jid,
+      canonicalId: (jid: string) => jid,
+      extractAndMapLID: () => ({ id: '' }),
+    } as any;
+
+    const btnMsg = new ButtonMessage('5511999999999@s.whatsapp.net', 'Escolha uma opção:');
+    btnMsg.setFooter('Rodapé');
+    btnMsg.addReply('Ajuda', 'help');
+    btnMsg.mention = {
+      id: 'q1',
+      text: '!b',
+      chat: { id: '5511999999999@s.whatsapp.net' },
+      user: { id: '5511999999999@s.whatsapp.net' },
+      extra: { key: { remoteJid: '5511999999999@s.whatsapp.net', id: 'q1', fromMe: false } },
+    } as any;
+
+    const converted = await new ConvertToWAMessage(fakeBot, btnMsg).refactory();
+    expect(converted.waMessage.__useBaileysHelper).toBe(true);
+
+    await sendInteractiveMessage(
+      { sendMessage: async (jid: string, payload: any, opts: any) => sentCalls.push({ jid, payload, opts }) },
+      converted.chatId,
+      converted.waMessage,
+      converted.options,
+    );
+
+    expect(sentCalls).toHaveLength(1);
+    expect(sentCalls[0].jid).toBe('5511999999999@s.whatsapp.net');
+    expect(sentCalls[0].opts.quote).toMatchObject({ id: 'q1' });
+    expect(sentCalls[0].payload.interactiveButtons).toBeUndefined();
+    expect(sentCalls[0].payload.interactiveMessage).toMatchObject({
+      body: { text: 'Escolha uma opção:' },
+      footer: { text: 'Rodapé' },
+      nativeFlowMessage: {
+        buttons: [
+          {
+            name: 'quick_reply',
+            buttonParamsJson: JSON.stringify({ display_text: 'Ajuda', id: 'help' }),
+          },
+        ],
+      },
+    });
+
+    const attrs = resolveOutboundMessageAttrs(sentCalls[0].payload);
+    expect(attrs.buttonAddonKind).toBe('interactive');
+    const bizNode = buildButtonAddonNode(attrs.buttonAddonKind);
+    expect(bizNode.tag).toBe('biz');
+  });
+});
+

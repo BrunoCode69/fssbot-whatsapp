@@ -105,7 +105,12 @@ export declare const Browsers: {
 };
 export declare function makeCacheableSignalKeyStore(store: any, _logger?: any): any;
 export declare function generateWAMessageFromContent(chatId: string, message: any, options?: any): any;
-export declare function sendInteractiveMessage(sock: any, jid: string, content: any): Promise<any>;
+/**
+ * Converte payloads de conveniência (`{ text, title, subtitle, footer, interactiveButtons }`)
+ * no formato `proto.Message.interactiveMessage` aceito nativamente pelo ZapoJS (sem injetar nó `bot`).
+ */
+export declare function toInteractiveProtoMessage(content: any): any;
+export declare function sendInteractiveMessage(sock: any, jid: string, content: any, options?: any): Promise<any>;
 export type WhatsAppBotConfig = Partial<SocketConfig> & {
     /** Auto carrega o histórico de mensagens ao se conectar */
     autoSyncHistory: boolean;
