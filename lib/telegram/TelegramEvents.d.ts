@@ -7,6 +7,10 @@ export default class TelegramEvents {
     configAll(): void;
     configCallbackQueries(): void;
     configMessage(): void;
+    configInlineQueries(): void;
+    configPreCheckoutQueries(): void;
+    configChatJoinRequests(): void;
+    configMessageReactions(): void;
     configChannelPost(): void;
     configPollAnswer(): void;
     configNewChatMembers(): void;

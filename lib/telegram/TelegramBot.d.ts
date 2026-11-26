@@ -22,6 +22,7 @@ export default class TelegramBot extends BotEvents implements IBot {
     phoneNumber: string;
     name: string;
     profileUrl: string;
+    private answeredCallbackQueries;
     constructor(options?: Partial<TelegramBotAPI.ConstructorOptions>);
     connect(auth: string | IAuth): Promise<void>;
     reconnect(alert?: boolean): Promise<void>;
@@ -101,4 +102,20 @@ export default class TelegramBot extends BotEvents implements IBot {
     getUserProfile(user: User, lowQuality?: boolean): Promise<Buffer>;
     getUserProfileUrl(user: User, lowQuality?: boolean): Promise<string>;
     setUserProfile(user: User, profile: Buffer): Promise<void>;
+    isCallbackQueryAnswered(queryId: string): boolean;
+    answerCallbackQuery(queryId: string, text?: string, showAlert?: boolean, url?: string): Promise<boolean>;
+    answerInlineQuery(queryId: string, results: TelegramBotAPI.InlineQueryResult[], options?: TelegramBotAPI.AnswerInlineQueryOptions): Promise<boolean>;
+    sendInvoice(chatId: string | number, title: string, description: string, payload: string, providerToken: string, currency: string, prices: Array<{
+        label: string;
+        amount: number;
+    }>, options?: TelegramBotAPI.SendInvoiceOptions): Promise<Message>;
+    answerPreCheckoutQuery(queryId: string, ok: boolean, errorMessage?: string): Promise<boolean>;
+    sendMediaGroup(chatId: string | number, media: TelegramBotAPI.InputMedia[], options?: TelegramBotAPI.SendMediaGroupOptions): Promise<Message[]>;
+    banUserInChat(chat: Chat, user: User, untilDate?: number): Promise<void>;
+    restrictUserInChat(chat: Chat, user: User, permissions: TelegramBotAPI.ChatPermissions, untilDate?: number): Promise<void>;
+    approveChatJoinRequests(chat: Chat, users: User[]): Promise<string[]>;
+    rejectChatJoinRequests(chat: Chat, users: User[]): Promise<string[]>;
+    createForumTopic(chatId: string | number, name: string, iconColor?: number): Promise<any>;
+    closeForumTopic(chatId: string | number, threadId: number): Promise<boolean>;
+    reopenForumTopic(chatId: string | number, threadId: number): Promise<boolean>;
 }

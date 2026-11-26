@@ -11,7 +11,9 @@ export declare enum ButtonType {
     /** Botão para fazer uma chamada */
     Call = "call",
     /** Botão para copiar código para a área de transferência (ex.: PIX) */
-    Copy = "copy"
+    Copy = "copy",
+    /** Botão que abre uma Web App / Mini App no Telegram */
+    WebApp = "web_app"
 }
 /**
  * Interface para um botão
@@ -66,6 +68,12 @@ export default class ButtonMessage extends Message {
      * @param copyCode - Código a ser copiado (ex: código PIX ou cupom)
      */
     addCopy(text: string, copyCode: string): this;
+    /**
+     * Adiciona um botão de Web App / Mini App (Telegram)
+     * @param text - Texto do botão
+     * @param url - URL HTTPS da Web App
+     */
+    addWebApp(text: string, url: string): this;
     /**
      * Remove um botão
      * @param button - Botão a remover

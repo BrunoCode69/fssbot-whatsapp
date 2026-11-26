@@ -14,9 +14,14 @@ import type {
   GroupJoinRequestEvent,
   GroupUpdateEvent,
   IdMappingEvent,
+  InlineQueryEvent,
   MessageProtocolEvent,
+  MessageReactionEvent,
   MessageUnavailableEvent,
+  NewsletterEvent,
+  PaymentSuccessEvent,
   PictureEvent,
+  PreCheckoutQueryEvent,
   PresenceEvent,
   ReceiptEvent,
 } from './BotEventTypes';
@@ -85,6 +90,16 @@ export type BotEventsMap = {
   'message-protocol': MessageProtocolEvent;
   /** [WhatsApp] Foto de perfil de contato/grupo alterada. */
   picture: PictureEvent;
+  /** [WhatsApp] Atualização em canal (newsletter). */
+  newsletter: NewsletterEvent | any;
+  /** [Telegram] Consulta inline (`@bot termo`). */
+  'inline-query': InlineQueryEvent;
+  /** [Telegram] Pré-checkout de pagamento / Telegram Stars. */
+  'pre-checkout-query': PreCheckoutQueryEvent;
+  /** [Telegram] Pagamento aprovado (`successful_payment`). */
+  'payment-success': PaymentSuccessEvent;
+  /** [Telegram] Reação nativa em mensagem (`message_reaction`). */
+  'message-reaction': MessageReactionEvent;
   /** Ocorre quando um erro é detectado. */
   error: Error;
 };

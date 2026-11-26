@@ -7,7 +7,7 @@ import Call from '../models/Call';
 import User from '../modules/user/User';
 import Chat from '../modules/chat/Chat';
 import Message from '../messages/Message';
-import type { BlocklistEvent, GroupJoinRequestEvent, GroupUpdateEvent, IdMappingEvent, PresenceEvent } from '../bot/BotEventTypes';
+import type { BlocklistEvent, ChatStateEvent, GroupJoinRequestEvent, GroupUpdateEvent, IdMappingEvent, InlineQueryEvent, MessageProtocolEvent, MessageReactionEvent, MessageUnavailableEvent, NewsletterEvent, PaymentSuccessEvent, PictureEvent, PreCheckoutQueryEvent, PresenceEvent, ReceiptEvent } from '../bot/BotEventTypes';
 /**
  * Mapeia os eventos que podem ser emitidos pelo cliente.
  */
@@ -121,6 +121,26 @@ export type ClientEventsMap = {
     blocklist: BlocklistEvent;
     /** [WhatsApp] Um LID foi associado a um número de telefone. */
     'id-mapping': IdMappingEvent;
+    /** [WhatsApp] Confirmação de entrega/leitura de mensagens enviadas. */
+    receipt: ReceiptEvent;
+    /** [WhatsApp] Contato digitando/gravando (requer `subscribePresence`). */
+    chatstate: ChatStateEvent;
+    /** [WhatsApp] Mensagem recebida sem conteúdo. */
+    'message-unavailable': MessageUnavailableEvent;
+    /** [WhatsApp] `protocolMessage` bruto recebido. */
+    'message-protocol': MessageProtocolEvent;
+    /** [WhatsApp] Foto de perfil alterada. */
+    picture: PictureEvent;
+    /** [WhatsApp] Atualização de canal (newsletter). */
+    newsletter: NewsletterEvent | any;
+    /** [Telegram] Consulta inline (`@bot termo`). */
+    'inline-query': InlineQueryEvent;
+    /** [Telegram] Pré-checkout de pagamento / Telegram Stars. */
+    'pre-checkout-query': PreCheckoutQueryEvent;
+    /** [Telegram] Pagamento aprovado (`successful_payment`). */
+    'payment-success': PaymentSuccessEvent;
+    /** [Telegram] Reação em mensagem (`message_reaction`). */
+    'message-reaction': MessageReactionEvent;
     /**
      * Evento de erro ocorrido.
      */

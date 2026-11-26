@@ -13,7 +13,10 @@ export function createInlineKeyboard(message: ButtonMessage): TelegramBotAPI.Inl
       if (button.type === 'copy') {
         return [{ text: button.text, copy_text: { text: button.content } } as any];
       }
-      throw new Error(`O botão do tipo "${button.type}" não é suportado pelo Telegram. Use botões de resposta, URL ou cópia.`);
+      if (button.type === 'web_app') {
+        return [{ text: button.text, web_app: { url: button.content } } as any];
+      }
+      throw new Error(`O botão do tipo "${button.type}" não é suportado pelo Telegram. Use botões de resposta, URL, cópia ou Web App.`);
     }),
   };
 }

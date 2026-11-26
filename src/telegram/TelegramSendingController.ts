@@ -425,6 +425,10 @@ export default class TelegramSendingController {
       options.reply_to_message_id = Number(message.mention.id || 0);
     }
 
+    if (message.extra?.threadId !== undefined && message.extra?.threadId !== null && message.extra?.threadId !== '') {
+      (options as any).message_thread_id = Number(message.extra.threadId);
+    }
+
     if (MediaMessage.isValid(message)) {
       options.caption = `${message.text || ''}`;
       options.title = `${message.name || ''}`;

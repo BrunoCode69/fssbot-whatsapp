@@ -14,6 +14,8 @@ export enum ButtonType {
   Call = "call",
   /** Botão para copiar código para a área de transferência (ex.: PIX) */
   Copy = "copy",
+  /** Botão que abre uma Web App / Mini App no Telegram */
+  WebApp = "web_app",
 }
 
 /**
@@ -116,6 +118,21 @@ export default class ButtonMessage extends Message {
       type: ButtonType.Copy,
       text,
       content: String(copyCode),
+    });
+
+    return this;
+  }
+
+  /**
+   * Adiciona um botão de Web App / Mini App (Telegram)
+   * @param text - Texto do botão
+   * @param url - URL HTTPS da Web App
+   */
+  public addWebApp(text: string, url: string) {
+    this.buttons.push({
+      type: ButtonType.WebApp,
+      text,
+      content: url,
     });
 
     return this;

@@ -268,6 +268,68 @@ export default class Client<Bot extends IBot = IBot>
 
     this.bot.on('blocklist', (update) => this.emit('blocklist', update));
     this.bot.on('id-mapping', (update) => this.emit('id-mapping', update));
+    this.bot.on('receipt', (update) => this.emit('receipt', update));
+    this.bot.on('chatstate', (update) => {
+      try {
+        this.emit('chatstate', {
+          ...update,
+          chat: Chat.apply(update.chat, link),
+          user: User.apply(update.user, link),
+        });
+      } catch (err) {
+        this.emit('error', getError(err));
+      }
+    });
+    this.bot.on('message-unavailable', (update) => {
+      try {
+        this.emit('message-unavailable', {
+          ...update,
+          chat: Chat.apply(update.chat, link),
+          user: User.apply(update.user, link),
+        });
+      } catch (err) {
+        this.emit('error', getError(err));
+      }
+    });
+    this.bot.on('message-protocol', (update) => this.emit('message-protocol', update));
+    this.bot.on('picture', (update) => this.emit('picture', update));
+    this.bot.on('newsletter', (update) => this.emit('newsletter', update));
+    this.bot.on('inline-query', (update) => {
+      try {
+        this.emit('inline-query', { ...update, user: User.apply(update.user, link) });
+      } catch (err) {
+        this.emit('error', getError(err));
+      }
+    });
+    this.bot.on('pre-checkout-query', (update) => {
+      try {
+        this.emit('pre-checkout-query', { ...update, user: User.apply(update.user, link) });
+      } catch (err) {
+        this.emit('error', getError(err));
+      }
+    });
+    this.bot.on('payment-success', (update) => {
+      try {
+        this.emit('payment-success', {
+          ...update,
+          chat: Chat.apply(update.chat, link),
+          user: User.apply(update.user, link),
+        });
+      } catch (err) {
+        this.emit('error', getError(err));
+      }
+    });
+    this.bot.on('message-reaction', (update) => {
+      try {
+        this.emit('message-reaction', {
+          ...update,
+          chat: Chat.apply(update.chat, link),
+          user: User.apply(update.user, link),
+        });
+      } catch (err) {
+        this.emit('error', getError(err));
+      }
+    });
 
     this.bot.on('error', (err) => {
       try {
@@ -1145,6 +1207,196 @@ export default class Client<Bot extends IBot = IBot>
     const value = typeof id == 'string' ? id : id?.id || '';
 
     return this.funcHandler.exec('user', this.feature('onExists'), value);
+  }
+
+  private callBot<T = any>(method: string, ...args: any[]): Promise<T> {
+    const fn = (this.bot as any)?.[method];
+    if (typeof fn !== 'function') {
+      return Promise.reject(new Error(`O adapter atual não oferece "${method}".`));
+    }
+    return Promise.resolve(fn.apply(this.bot, args));
+  }
+
+  public pinChat(chat: Chat | string, pinned: boolean = true): Promise<void> {
+    return this.callBot('pinChat', this.linkChat(chat), pinned);
+  }
+
+  public muteChat(chat: Chat | string, muted: boolean = true, durationMs?: number): Promise<void> {
+    return this.callBot('muteChat', this.linkChat(chat), muted, durationMs);
+  }
+
+  public archiveChat(chat: Chat | string, archived: boolean = true): Promise<void> {
+    return this.callBot('archiveChat', this.linkChat(chat), archived);
+  }
+
+  public markChatAsRead(chat: Chat | string, read: boolean = true): Promise<void> {
+    return this.callBot('markChatAsRead', this.linkChat(chat), read);
+  }
+
+  public clearChat(chat: Chat | string): Promise<void> {
+    return this.callBot('clearChat', this.linkChat(chat));
+  }
+
+  public deleteChat(chat: Chat | string): Promise<void> {
+    return this.callBot('deleteChat', this.linkChat(chat));
+  }
+
+  public lockChat(chat: Chat | string, locked: boolean = true): Promise<void> {
+    return this.callBot('lockChat', this.linkChat(chat), locked);
+  }
+
+  public deleteMessageForMe(message: Message): Promise<void> {
+    return this.callBot('deleteMessageForMe', message);
+  }
+
+  public sendRaw(chat: Chat | string, payload: any, options?: any): Promise<any> {
+    const chatId = typeof chat === 'string' ? chat : chat?.id || '';
+    return this.callBot('sendRaw', chatId, payload, options);
+  }
+
+  public sendStatusText(text: string, recipients?: string[]): Promise<any> {
+    return this.callBot('sendStatusText', text, recipients);
+  }
+
+  public sendStatusMedia(media: string | Buffer, type: 'image' | 'video' | 'audio' = 'image', caption?: string, recipients?: string[]): Promise<any> {
+    return this.callBot('sendStatusMedia', media, type, caption, recipients);
+  }
+
+  public revokeStatus(messageId: string, recipients?: string[]): Promise<any> {
+    return this.callBot('revokeStatus', messageId, recipients);
+  }
+
+  public getNewsletterInfo(jid: string): Promise<any> {
+    return this.callBot('getNewsletterInfo', jid);
+  }
+
+  public followNewsletter(jid: string): Promise<void> {
+    return this.callBot('followNewsletter', jid);
+  }
+
+  public unfollowNewsletter(jid: string): Promise<void> {
+    return this.callBot('unfollowNewsletter', jid);
+  }
+
+  public muteNewsletter(jid: string, muted: boolean = true): Promise<void> {
+    return this.callBot('muteNewsletter', jid, muted);
+  }
+
+  public sendNewsletterMessage(jid: string, content: any): Promise<any> {
+    return this.callBot('sendNewsletterMessage', jid, content);
+  }
+
+  public createCommunity(subject: string, description?: string): Promise<any> {
+    return this.callBot('createCommunity', subject, description);
+  }
+
+  public deactivateCommunity(communityJid: string): Promise<void> {
+    return this.callBot('deactivateCommunity', communityJid);
+  }
+
+  public linkCommunitySubGroups(communityJid: string, subGroupJids: string[]): Promise<any> {
+    return this.callBot('linkCommunitySubGroups', communityJid, subGroupJids);
+  }
+
+  public unlinkCommunitySubGroups(communityJid: string, subGroupJids: string[], removeOrphaned: boolean = false): Promise<any> {
+    return this.callBot('unlinkCommunitySubGroups', communityJid, subGroupJids, removeOrphaned);
+  }
+
+  public getCommunitySubGroups(communityJid: string): Promise<any> {
+    return this.callBot('getCommunitySubGroups', communityJid);
+  }
+
+  public setGroupMemberLinkMode(chat: Chat | string, allMembers: boolean): Promise<void> {
+    return this.callBot('setGroupMemberLinkMode', this.linkChat(chat), allMembers);
+  }
+
+  public setGroupHistoryShareMode(chat: Chat | string, shareHistory: boolean): Promise<void> {
+    return this.callBot('setGroupHistoryShareMode', this.linkChat(chat), shareHistory);
+  }
+
+  public getPrivacySettings(): Promise<any> {
+    return this.callBot('getPrivacySettings');
+  }
+
+  public setPrivacySetting(setting: any, value: any): Promise<any> {
+    return this.callBot('setPrivacySetting', setting, value);
+  }
+
+  public getDefaultDisappearingMode(jid: string): Promise<any> {
+    return this.callBot('getDisappearingMode', jid);
+  }
+
+  public setDefaultDisappearingMode(seconds: number): Promise<void> {
+    return this.callBot('setDefaultDisappearingMode', seconds);
+  }
+
+  public resolveWhatsAppUsername(username: string): Promise<any> {
+    return this.callBot('resolveUsername', username);
+  }
+
+  public getBusinessProfile(jid: string): Promise<any> {
+    return this.callBot('getBusinessProfile', jid);
+  }
+
+  public editBusinessProfile(input: any): Promise<void> {
+    return this.callBot('editBusinessProfile', input);
+  }
+
+  public setBroadcastList(id: string, name: string, recipients: string[]): Promise<void> {
+    return this.callBot('setBroadcastList', id, name, recipients);
+  }
+
+  public removeBroadcastList(id: string): Promise<void> {
+    return this.callBot('removeBroadcastList', id);
+  }
+
+  public sendBroadcastList(listJid: string, content: any, recipients: string[]): Promise<any> {
+    return this.callBot('sendBroadcastList', listJid, content, recipients);
+  }
+
+  public answerCallbackQuery(queryId: string, text?: string, showAlert: boolean = false, url?: string): Promise<boolean> {
+    return this.callBot('answerCallbackQuery', queryId, text, showAlert, url);
+  }
+
+  public answerInlineQuery(queryId: string, results: any[], options?: any): Promise<boolean> {
+    return this.callBot('answerInlineQuery', queryId, results, options);
+  }
+
+  public sendInvoice(chat: Chat | string, title: string, description: string, payload: string, providerToken: string, currency: string, prices: Array<{ label: string; amount: number }>, options?: any): Promise<Message> {
+    const chatId = typeof chat === 'string' ? chat : chat?.id || '';
+    return this.callBot('sendInvoice', chatId, title, description, payload, providerToken, currency, prices, options);
+  }
+
+  public answerPreCheckoutQuery(queryId: string, ok: boolean, errorMessage?: string): Promise<boolean> {
+    return this.callBot('answerPreCheckoutQuery', queryId, ok, errorMessage);
+  }
+
+  public sendMediaGroup(chat: Chat | string, media: any[], options?: any): Promise<Message[]> {
+    const chatId = typeof chat === 'string' ? chat : chat?.id || '';
+    return this.callBot('sendMediaGroup', chatId, media, options);
+  }
+
+  public restrictUserInChat(chat: Chat | string, user: User | string, permissions: any, untilDate?: number): Promise<void> {
+    return this.callBot('restrictUserInChat', this.linkChat(chat), this.linkUser(user), permissions, untilDate);
+  }
+
+  public banUserInChat(chat: Chat | string, user: User | string, untilDate?: number): Promise<void> {
+    return this.callBot('banUserInChat', this.linkChat(chat), this.linkUser(user), untilDate);
+  }
+
+  public createForumTopic(chat: Chat | string, name: string, iconColor?: number): Promise<any> {
+    const chatId = typeof chat === 'string' ? chat : chat?.id || '';
+    return this.callBot('createForumTopic', chatId, name, iconColor);
+  }
+
+  public closeForumTopic(chat: Chat | string, threadId: number): Promise<boolean> {
+    const chatId = typeof chat === 'string' ? chat : chat?.id || '';
+    return this.callBot('closeForumTopic', chatId, threadId);
+  }
+
+  public reopenForumTopic(chat: Chat | string, threadId: number): Promise<boolean> {
+    const chatId = typeof chat === 'string' ? chat : chat?.id || '';
+    return this.callBot('reopenForumTopic', chatId, threadId);
   }
 
   public static getClients(): Record<string, Client<IBot>> {

@@ -41,6 +41,7 @@ export default class TelegramBot extends BotEvents implements IBot {
   public phoneNumber: string = '';
   public name: string = '';
   public profileUrl: string = '';
+  private answeredCallbackQueries = new Set<string>();
 
   constructor(options?: Partial<TelegramBotAPI.ConstructorOptions>) {
     super();
@@ -598,5 +599,121 @@ export default class TelegramBot extends BotEvents implements IBot {
 
   public async setUserProfile(user: User, profile: Buffer): Promise<void> {
     await this.bot.setChatPhoto(Number(user.id), profile);
+  }
+
+  public isCallbackQueryAnswered(queryId: string): boolean {
+    return this.answeredCallbackQueries.has(queryId);
+  }
+
+  public async answerCallbackQuery(
+    queryId: string,
+    text?: string,
+    showAlert: boolean = false,
+    url?: string,
+  ): Promise<boolean> {
+    this.answeredCallbackQueries.add(queryId);
+    if (this.answeredCallbackQueries.size > 2000) {
+      const oldest = this.answeredCallbackQueries.values().next().value;
+      if (oldest) this.answeredCallbackQueries.delete(oldest);
+    }
+    return await this.bot.answerCallbackQuery(queryId, {
+      ...(text !== undefined && text !== '' ? { text } : {}),
+      ...(showAlert ? { show_alert: true } : {}),
+      ...(url ? { url } : {}),
+    });
+  }
+
+  public async answerInlineQuery(
+    queryId: string,
+    results: TelegramBotAPI.InlineQueryResult[],
+    options?: TelegramBotAPI.AnswerInlineQueryOptions,
+  ): Promise<boolean> {
+    return await this.bot.answerInlineQuery(queryId, results, options);
+  }
+
+  public async sendInvoice(
+    chatId: string | number,
+    title: string,
+    description: string,
+    payload: string,
+    providerToken: string,
+    currency: string,
+    prices: Array<{ label: string; amount: number }>,
+    options?: TelegramBotAPI.SendInvoiceOptions,
+  ): Promise<Message> {
+    const sent = await this.bot.sendInvoice(
+      Number(chatId),
+      title,
+      description,
+      payload,
+      providerToken,
+      currency,
+      prices,
+      options,
+    );
+    return await new TelegramToRompotConverter(sent).convert();
+  }
+
+  public async answerPreCheckoutQuery(
+    queryId: string,
+    ok: boolean,
+    errorMessage?: string,
+  ): Promise<boolean> {
+    return await this.bot.answerPreCheckoutQuery(queryId, ok, errorMessage ? { error_message: errorMessage } : undefined);
+  }
+
+  public async sendMediaGroup(
+    chatId: string | number,
+    media: TelegramBotAPI.InputMedia[],
+    options?: TelegramBotAPI.SendMediaGroupOptions,
+  ): Promise<Message[]> {
+    const sent = await this.bot.sendMediaGroup(Number(chatId), media, options);
+    return await Promise.all((sent || []).map((item) => new TelegramToRompotConverter(item).convert()));
+  }
+
+  public async banUserInChat(chat: Chat, user: User, untilDate?: number): Promise<void> {
+    await this.bot.banChatMember(Number(chat.id), Number(user.id), untilDate ? { until_date: untilDate } : undefined);
+  }
+
+  public async restrictUserInChat(
+    chat: Chat,
+    user: User,
+    permissions: TelegramBotAPI.ChatPermissions,
+    untilDate?: number,
+  ): Promise<void> {
+    await this.bot.restrictChatMember(Number(chat.id), Number(user.id), {
+      permissions,
+      ...(untilDate ? { until_date: untilDate } : {}),
+    });
+  }
+
+  public async approveChatJoinRequests(chat: Chat, users: User[]): Promise<string[]> {
+    const approved: string[] = [];
+    for (const user of users) {
+      await this.bot.approveChatJoinRequest(Number(chat.id), Number(user.id));
+      approved.push(String(user.id));
+    }
+    return approved;
+  }
+
+  public async rejectChatJoinRequests(chat: Chat, users: User[]): Promise<string[]> {
+    const rejected: string[] = [];
+    for (const user of users) {
+      await this.bot.declineChatJoinRequest(Number(chat.id), Number(user.id));
+      rejected.push(String(user.id));
+    }
+    return rejected;
+  }
+
+  public async createForumTopic(chatId: string | number, name: string, iconColor?: number): Promise<any> {
+    return await this.bot.createForumTopic(Number(chatId), name, iconColor ? { icon_color: iconColor as any } : undefined);
+  }
+
+  public async closeForumTopic(chatId: string | number, threadId: number): Promise<boolean> {
+    return await this.bot.closeForumTopic(Number(chatId), Number(threadId));
+  }
+
+  public async reopenForumTopic(chatId: string | number, threadId: number): Promise<boolean> {
+    return await this.bot.reopenForumTopic(Number(chatId), Number(threadId));
   }
 }

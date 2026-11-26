@@ -160,3 +160,49 @@ export type PictureEvent = {
   /** Evento bruto do Zapo */
   raw: unknown;
 };
+
+/** Evento `inline-query` do Telegram (usuário digitou `@bot consulta`). */
+export type InlineQueryEvent = {
+  id: string;
+  query: string;
+  offset: string;
+  user: User;
+};
+
+/** Evento `pre-checkout-query` do Telegram (confirmação antes de concluir pagamento). */
+export type PreCheckoutQueryEvent = {
+  id: string;
+  currency: string;
+  totalAmount: number;
+  invoicePayload: string;
+  user: User;
+};
+
+/** Evento `payment-success` do Telegram (pagamento concluído / Telegram Stars). */
+export type PaymentSuccessEvent = {
+  chat: Chat;
+  user: User;
+  messageId: string;
+  currency: string;
+  totalAmount: number;
+  invoicePayload: string;
+  telegramChargeId: string;
+  providerChargeId: string;
+};
+
+/** Evento `message-reaction` (reação em mensagem via Telegram `message_reaction`). */
+export type MessageReactionEvent = {
+  chat: Chat;
+  user: User;
+  messageId: string;
+  emoji: string;
+  added: string[];
+  removed: string[];
+};
+
+/** Evento `newsletter` (atualizações em canais do WhatsApp). */
+export type NewsletterEvent = {
+  id: string;
+  action: string;
+  raw: unknown;
+};

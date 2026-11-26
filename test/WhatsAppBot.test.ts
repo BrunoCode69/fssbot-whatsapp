@@ -552,3 +552,81 @@ describe('WhatsApp interactive buttons & lists for ZapoJS (PV and groups)', () =
   });
 });
 
+describe('ZapoJS adapter & Telegram extended features', () => {
+  test('createZapoAdapter routes group participants, privacy, chat mutations, and onWhatsApp to ZapoJS coordinators', async () => {
+    const calls: any[] = [];
+    const bot = new (require('../src/wa/WhatsAppBot').default)();
+    bot.id = '5511000000000@s.whatsapp.net';
+    const fakeZapo = {
+      group: {
+        addParticipants: async (g: string, p: string[]) => calls.push(['add', g, p]),
+        removeParticipants: async (g: string, p: string[]) => calls.push(['remove', g, p]),
+        promoteParticipants: async (g: string, p: string[]) => calls.push(['promote', g, p]),
+        demoteParticipants: async (g: string, p: string[]) => calls.push(['demote', g, p]),
+        leaveGroup: async (gs: string[]) => calls.push(['leave', gs]),
+        setMemberLinkMode: async (g: string, m: string) => calls.push(['linkMode', g, m]),
+      },
+      chat: {
+        setChatPin: async (j: string, v: boolean) => calls.push(['pin', j, v]),
+        setChatMute: async (j: string, v: boolean) => calls.push(['mute', j, v]),
+        setChatArchive: async (j: string, v: boolean) => calls.push(['archive', j, v]),
+        setChatRead: async (j: string, v: boolean) => calls.push(['read', j, v]),
+        clearChat: async (j: string) => calls.push(['clear', j]),
+        setMessageStar: async (k: any, v: boolean) => calls.push(['star', k.id, v]),
+      },
+      privacy: {
+        blockUser: async (j: string) => calls.push(['block', j]),
+        unblockUser: async (j: string) => calls.push(['unblock', j]),
+        getBlocklist: async () => ['5511777@s.whatsapp.net'],
+      },
+      profile: {
+        getLidsByPhoneNumbers: async () => [{ status: 'in', pnJid: '5511999999999@s.whatsapp.net', lidJid: '999@lid' }],
+      },
+      status: {
+        send: async (input: any) => { calls.push(['status', input.content.type, input.recipients]); return { id: 'st1' }; },
+      },
+      newsletter: {
+        follow: async (j: string) => calls.push(['follow', j]),
+        unfollow: async (j: string) => calls.push(['unfollow', j]),
+        mute: async (i: any) => calls.push(['nlMute', i.newsletterJid, i.muted]),
+      },
+    };
+    bot.zapo = fakeZapo;
+    const sock = bot.createZapoAdapter(fakeZapo);
+    bot.sock = sock;
+
+    await sock.groupParticipantsUpdate('120@g.us', ['5511888@s.whatsapp.net'], 'promote');
+    await sock.updateBlockStatus('5511888@s.whatsapp.net', 'block');
+    const waCheck = await bot.onExists('5511999999999@s.whatsapp.net');
+    await bot.pinChat('5511999999999@s.whatsapp.net', true);
+    await bot.muteChat('5511999999999@s.whatsapp.net', true, 60_000);
+    await bot.archiveChat('5511999999999@s.whatsapp.net', true);
+    await bot.markChatAsRead('5511999999999@s.whatsapp.net', true);
+    await bot.clearChat('5511999999999@s.whatsapp.net');
+    await bot.followNewsletter('120@newsletter');
+    await bot.sendStatusText('Status teste', ['5511888@s.whatsapp.net']);
+
+    expect(waCheck.exists).toBe(true);
+    expect(calls).toEqual([
+      ['promote', '120@g.us', ['5511888@s.whatsapp.net']],
+      ['block', '5511888@s.whatsapp.net'],
+      ['pin', '5511999999999@s.whatsapp.net', true],
+      ['mute', '5511999999999@s.whatsapp.net', true],
+      ['archive', '5511999999999@s.whatsapp.net', true],
+      ['read', '5511999999999@s.whatsapp.net', true],
+      ['clear', '5511999999999@s.whatsapp.net'],
+      ['follow', '120@newsletter'],
+      ['status', 'text', ['5511888@s.whatsapp.net']],
+    ]);
+  });
+
+  test('supports web_app button in Telegram inline keyboard', () => {
+    const ButtonMessage = require('../src/messages/ButtonMessage').default;
+    const { createInlineKeyboard } = require('../src/telegram/inline-keyboard');
+    const msg = new ButtonMessage('123', 'Abrir App');
+    msg.addWebApp('Painel', 'https://example.com/webapp');
+    const kb = createInlineKeyboard(msg);
+    expect(kb.inline_keyboard).toEqual([[{ text: 'Painel', web_app: { url: 'https://example.com/webapp' } }]]);
+  });
+});
+

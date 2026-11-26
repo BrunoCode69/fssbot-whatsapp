@@ -786,34 +786,86 @@ export default class WhatsAppBot extends BotEvents implements IBot {
   }
 
   public createZapoAdapter(zapo: any): any {
+    const adapter = this;
     return {
       groupMetadata: async (id: string) => zapo.group?.queryGroupMetadata(id),
       groupUpdateSubject: async (id: string, name: string) => zapo.group?.setSubject(id, name),
       groupUpdateDescription: async (id: string, desc: string) => zapo.group?.setDescription(id, desc),
       profilePictureUrl: async (id: string, type?: any) => {
-        const pic = await zapo.profile?.getPicture(id, type);
+        const pic = await zapo.profile?.getProfilePicture(id, type);
         return pic?.url || '';
       },
-      updateProfilePicture: async (id: string, image: Buffer) => zapo.profile?.setPicture(id, image),
-      groupParticipantsUpdate: async (chatId: string, participants: string[], action: any) =>
-        zapo.group?.updateParticipants(chatId, participants, action),
-      sendPresenceUpdate: async (status: any, id?: string) => zapo.presence?.sendPresence(status, id),
+      updateProfilePicture: async (id: string, image: Buffer) => {
+        const target = normalizeJid(id) === normalizeJid(adapter.id) ? undefined : id;
+        return await zapo.profile?.setProfilePicture(new Uint8Array(image), target);
+      },
+      groupParticipantsUpdate: async (chatId: string, participants: string[], action: 'add' | 'remove' | 'promote' | 'demote') => {
+        if (action === 'add') return await zapo.group?.addParticipants(chatId, participants);
+        if (action === 'remove') return await zapo.group?.removeParticipants(chatId, participants);
+        if (action === 'promote') return await zapo.group?.promoteParticipants(chatId, participants);
+        if (action === 'demote') return await zapo.group?.demoteParticipants(chatId, participants);
+        return [];
+      },
+      sendPresenceUpdate: async (status: any, id?: string) => {
+        if (!id && (status === 'available' || status === 'unavailable')) {
+          return await zapo.presence?.send(status);
+        }
+        if (id && (status === 'composing' || status === 'recording' || status === 'paused')) {
+          return await zapo.presence?.sendChatstate(id, {
+            state: status === 'paused' ? 'paused' : 'composing',
+            media: status === 'recording' ? 'audio' : undefined,
+          });
+        }
+        return await zapo.presence?.send(status === 'unavailable' ? 'unavailable' : 'available');
+      },
       groupCreate: async (name: string, members: string[]) => zapo.group?.createGroup(name, members),
-      groupLeave: async (id: string) => zapo.group?.leave(id),
-      groupInviteCode: async (id: string) => zapo.group?.getInviteCode(id),
-      groupRevokeInvite: async (id: string) => zapo.group?.revokeInviteCode(id),
-      groupAcceptInvite: async (code: string) => zapo.group?.acceptInvite(code),
-      groupSettingUpdate: async (id: string, setting: any) => zapo.group?.setSetting(id, setting, true),
-      groupMemberAddMode: async (id: string, mode: any) => zapo.group?.setSetting(id, 'member_add_mode', mode),
-      groupJoinApprovalMode: async (id: string, mode: any) => zapo.group?.setSetting(id, 'membership_approval_mode', mode),
-      groupToggleEphemeral: async (id: string, seconds: number) => zapo.group?.setSetting(id, 'ephemeral', seconds),
-      groupRequestParticipantsList: async (_id: string) => [],
-      groupRequestParticipantsUpdate: async (_id: string, _targets: string[], _action: any) => [],
-      groupGetInviteInfo: async (_code: string) => null,
+      groupLeave: async (id: string) => zapo.group?.leaveGroup([id]),
+      groupInviteCode: async (id: string) => zapo.group?.queryInviteCode(id),
+      groupRevokeInvite: async (id: string) => {
+        const res = await zapo.group?.revokeInvite(id);
+        return typeof res === 'string' ? res : res?.code || '';
+      },
+      groupAcceptInvite: async (code: string) => {
+        const meta = await zapo.group?.joinGroupViaInvite(code);
+        return meta?.jid || '';
+      },
+      groupSettingUpdate: async (id: string, setting: any) => {
+        if (setting === 'announcement' || setting === 'not_announcement') {
+          return await zapo.group?.setSetting(id, 'announcement', setting === 'announcement');
+        }
+        if (setting === 'locked' || setting === 'unlocked') {
+          return await zapo.group?.setSetting(id, 'restrict', setting === 'locked');
+        }
+        return await zapo.group?.setSetting(id, setting, true);
+      },
+      groupMemberAddMode: async (id: string, mode: any) => zapo.group?.setMemberAddMode(id, mode),
+      groupJoinApprovalMode: async (id: string, mode: any) =>
+        zapo.group?.setSetting(id, 'membership_approval_mode', mode === 'on' || mode === true),
+      groupToggleEphemeral: async (id: string, seconds: number) => zapo.group?.setEphemeralDuration(id, seconds),
+      groupRequestParticipantsList: async (id: string) => {
+        const list = (await zapo.group?.queryMembershipApprovalRequests(id)) || [];
+        return list.map((item: any) => ({
+          jid: item.jid,
+          lid: item.lid,
+          phone_number: item.phoneNumber,
+          request_time: item.requestTime,
+          request_method: item.method,
+        }));
+      },
+      groupRequestParticipantsUpdate: async (id: string, targets: string[], action: 'approve' | 'reject') => {
+        if (action === 'approve') await zapo.group?.approveMembershipRequests(id, targets);
+        else await zapo.group?.rejectMembershipRequests(id, targets);
+        return targets.map((jid) => ({ jid, status: '200' }));
+      },
+      groupGetInviteInfo: async (code: string) => zapo.group?.queryGroupInviteInfo(code),
       rejectCall: async (_callId: string, _chatId: string) => {},
       fetchStatus: async (id: string) => zapo.profile?.getStatus(id),
-      updateBlockStatus: async (id: string, action: any) => zapo.privacy?.updateBlocklist([id], action),
-      fetchBlocklist: async () => zapo.privacy?.getBlocklist(),
+      updateBlockStatus: async (id: string, action: 'block' | 'unblock') =>
+        action === 'unblock' ? zapo.privacy?.unblockUser(id) : zapo.privacy?.blockUser(id),
+      fetchBlocklist: async () => {
+        const res = await zapo.privacy?.getBlocklist();
+        return Array.isArray(res) ? res : res?.jids || [];
+      },
       presenceSubscribe: async (id: string) => zapo.presence?.subscribe(id),
       updateProfileName: async (name: string) => zapo.profile?.setPushName(name),
       updateProfileStatus: async (status: string) => zapo.profile?.setStatus(status),
@@ -824,8 +876,23 @@ export default class WhatsAppBot extends BotEvents implements IBot {
           }
         }
       },
-      chatModify: async (_mod: any, _jid: string) => {},
-      star: async (_jid: string, _keys: any[], _star: boolean) => {},
+      chatModify: async (mod: any, jid: string) => {
+        if (!zapo.chat) return;
+        if ('pin' in mod) await zapo.chat.setChatPin(jid, !!mod.pin);
+        if ('mute' in mod) await zapo.chat.setChatMute(jid, mod.mute != null, typeof mod.mute === 'number' ? mod.mute : undefined);
+        if ('archive' in mod) await zapo.chat.setChatArchive(jid, !!mod.archive);
+        if ('markRead' in mod) await zapo.chat.setChatRead(jid, !!mod.markRead);
+        if ('clear' in mod) await zapo.chat.clearChat(jid);
+        if ('delete' in mod) await zapo.chat.deleteChat(jid);
+        if ('lock' in mod) await zapo.chat.setChatLock(jid, !!mod.lock);
+      },
+      star: async (jid: string, keys: any[], star: boolean) => {
+        for (const k of keys) {
+          if (k?.id) {
+            await zapo.chat?.setMessageStar({ chatJid: jid, id: k.id, fromMe: !!k.fromMe, participant: k.participant }, star);
+          }
+        }
+      },
       sendMessage: async (chatId: string, content: any, options?: any) => {
         return await zapo.message?.send(chatId, content, options);
       },
@@ -835,7 +902,15 @@ export default class WhatsAppBot extends BotEvents implements IBot {
       updateMediaMessage: async (msg: any) => {
         return await zapo.message?.requestMediaReupload(msg);
       },
-      onWhatsApp: async (id: string) => [{ exists: true, jid: id }],
+      onWhatsApp: async (id: string) => {
+        const clean = getPhoneNumber(id) || String(id).replace(/\D/g, '');
+        if (!clean || !zapo.profile?.getLidsByPhoneNumbers) return [{ exists: true, jid: id }];
+        const res = await zapo.profile.getLidsByPhoneNumbers([clean]);
+        const entry = Array.isArray(res) ? res[0] : undefined;
+        if (!entry) return [{ exists: false, jid: id }];
+        const exists = entry.status !== 'out';
+        return [{ exists, jid: entry.pnJid || `${clean}@s.whatsapp.net`, lid: entry.lidJid }];
+      },
       ev: { on: () => {} },
       signalRepository: undefined,
       waitForConnectionUpdate: async () => {},
@@ -2176,6 +2251,221 @@ export default class WhatsAppBot extends BotEvents implements IBot {
 
   public async groupAcceptInvite(code: string): Promise<string> {
     return (await this.sock?.groupAcceptInvite(code)) || '';
+  }
+
+  // ============================================
+  // RECURSOS AVANÇADOS ZAPOJS (CHAT, STATUS, NEWSLETTER, COMUNIDADES, PRIVACIDADE, BUSINESS)
+  // ============================================
+
+  private requireZapo(): any {
+    if (!this.zapo) {
+      throw new Error('Operação requer conexão WhatsApp ativa via ZapoJS.');
+    }
+    return this.zapo;
+  }
+
+  public async pinChat(chat: Chat | string, pinned: boolean = true): Promise<void> {
+    const id = await this.resolveId(typeof chat === 'string' ? chat : chat?.id);
+    if (!id) throw new Error('Chat inválido para fixar.');
+    await this.requireZapo().chat.setChatPin(id, !!pinned);
+  }
+
+  public async muteChat(chat: Chat | string, muted: boolean = true, durationMs?: number): Promise<void> {
+    const id = await this.resolveId(typeof chat === 'string' ? chat : chat?.id);
+    if (!id) throw new Error('Chat inválido para silenciar.');
+    const muteEndTimestampMs = muted
+      ? durationMs !== undefined
+        ? Date.now() + durationMs
+        : 253402214400000 // mute permanente (9999-12-31)
+      : undefined;
+    await this.requireZapo().chat.setChatMute(id, !!muted, muteEndTimestampMs);
+  }
+
+  public async archiveChat(chat: Chat | string, archived: boolean = true): Promise<void> {
+    const id = await this.resolveId(typeof chat === 'string' ? chat : chat?.id);
+    if (!id) throw new Error('Chat inválido para arquivar.');
+    await this.requireZapo().chat.setChatArchive(id, !!archived);
+  }
+
+  public async markChatAsRead(chat: Chat | string, read: boolean = true): Promise<void> {
+    const id = await this.resolveId(typeof chat === 'string' ? chat : chat?.id);
+    if (!id) throw new Error('Chat inválido para marcar leitura.');
+    await this.requireZapo().chat.setChatRead(id, !!read);
+  }
+
+  public async clearChat(chat: Chat | string): Promise<void> {
+    const id = await this.resolveId(typeof chat === 'string' ? chat : chat?.id);
+    if (!id) throw new Error('Chat inválido para limpar.');
+    await this.requireZapo().chat.clearChat(id);
+  }
+
+  public async deleteChat(chat: Chat | string): Promise<void> {
+    const id = await this.resolveId(typeof chat === 'string' ? chat : chat?.id);
+    if (!id) throw new Error('Chat inválido para apagar.');
+    await this.requireZapo().chat.deleteChat(id);
+  }
+
+  public async lockChat(chat: Chat | string, locked: boolean = true): Promise<void> {
+    const id = await this.resolveId(typeof chat === 'string' ? chat : chat?.id);
+    if (!id) throw new Error('Chat inválido para trancar.');
+    await this.requireZapo().chat.setChatLock(id, !!locked);
+  }
+
+  public async deleteMessageForMe(message: Message): Promise<void> {
+    const key = await this.getMessageKey(message);
+    if (!key?.remoteJid || !key.id) return;
+    await this.requireZapo().chat.deleteMessageForMe({
+      chatJid: key.remoteJid,
+      id: key.id,
+      fromMe: !!key.fromMe,
+      participant: key.participant || undefined,
+    });
+  }
+
+  public async sendRaw(chatId: string, payload: any, options?: any): Promise<any> {
+    const id = await this.resolveId(chatId);
+    if (!id) throw new Error(`Invalid chat ID: ${chatId}`);
+    return await this.requireZapo().message.send(id, payload, options);
+  }
+
+  private async resolveStatusRecipients(recipients?: string[]): Promise<string[]> {
+    if (Array.isArray(recipients) && recipients.length > 0) {
+      const resolved = await Promise.all(recipients.map((r) => this.resolveId(r)));
+      return resolved.filter(Boolean);
+    }
+    const users = await this.getUsers();
+    const list: string[] = [];
+    for (const u of users) {
+      const id = normalizeJid(u);
+      if (id && isUserJid(id) && id !== this.id) list.push(id);
+    }
+    return list;
+  }
+
+  public async sendStatusText(text: string, recipients?: string[]): Promise<any> {
+    const targets = await this.resolveStatusRecipients(recipients);
+    return await this.requireZapo().status.send({
+      content: { type: 'text', text: String(text ?? '') },
+      recipients: targets,
+    });
+  }
+
+  public async sendStatusMedia(
+    media: string | Buffer,
+    type: 'image' | 'video' | 'audio' = 'image',
+    caption?: string,
+    recipients?: string[],
+  ): Promise<any> {
+    const targets = await this.resolveStatusRecipients(recipients);
+    const content: any = {
+      type,
+      media,
+      ...(caption ? { caption } : {}),
+    };
+    return await this.requireZapo().status.send({ content, recipients: targets });
+  }
+
+  public async revokeStatus(messageId: string, recipients?: string[]): Promise<any> {
+    const targets = await this.resolveStatusRecipients(recipients);
+    return await this.requireZapo().status.revokeStatus({ messageId, recipients: targets });
+  }
+
+  public async getNewsletterInfo(jid: string): Promise<any> {
+    return await this.requireZapo().newsletter.fetch(jid);
+  }
+
+  public async followNewsletter(jid: string): Promise<void> {
+    await this.requireZapo().newsletter.follow(jid);
+  }
+
+  public async unfollowNewsletter(jid: string): Promise<void> {
+    await this.requireZapo().newsletter.unfollow(jid);
+  }
+
+  public async muteNewsletter(jid: string, muted: boolean = true): Promise<void> {
+    await this.requireZapo().newsletter.mute({ newsletterJid: jid, muted: !!muted });
+  }
+
+  public async sendNewsletterMessage(jid: string, content: any): Promise<any> {
+    return await this.requireZapo().newsletter.send(jid, content);
+  }
+
+  public async createCommunity(subject: string, description?: string): Promise<any> {
+    return await this.requireZapo().group.createCommunity(subject, description ? { description } : undefined);
+  }
+
+  public async deactivateCommunity(communityJid: string): Promise<void> {
+    await this.requireZapo().group.deactivateCommunity(communityJid);
+  }
+
+  public async linkCommunitySubGroups(communityJid: string, subGroupJids: string[]): Promise<any> {
+    return await this.requireZapo().group.linkSubGroups(communityJid, subGroupJids);
+  }
+
+  public async unlinkCommunitySubGroups(communityJid: string, subGroupJids: string[], removeOrphanedMembers: boolean = false): Promise<any> {
+    return await this.requireZapo().group.unlinkSubGroups(communityJid, subGroupJids, { removeOrphanedMembers });
+  }
+
+  public async getCommunitySubGroups(communityJid: string): Promise<any> {
+    return await this.requireZapo().group.fetchSubGroups(communityJid);
+  }
+
+  public async setGroupMemberLinkMode(chat: Chat | string, allMembers: boolean): Promise<void> {
+    const id = await this.requireGroupAdmin(typeof chat === 'string' ? new Chat(chat) : chat);
+    if (!id) return;
+    await this.requireZapo().group.setMemberLinkMode(id, allMembers ? 'all_member_link' : 'admin_link');
+  }
+
+  public async setGroupHistoryShareMode(chat: Chat | string, shareHistory: boolean): Promise<void> {
+    const id = await this.requireGroupAdmin(typeof chat === 'string' ? new Chat(chat) : chat);
+    if (!id) return;
+    await this.requireZapo().group.setMemberShareGroupHistoryMode(id, shareHistory ? 'all_member_share' : 'admin_share');
+  }
+
+  public async getPrivacySettings(): Promise<any> {
+    return await this.requireZapo().privacy.getPrivacySettings();
+  }
+
+  public async setPrivacySetting(setting: any, value: any): Promise<any> {
+    return await this.requireZapo().privacy.setPrivacySetting(setting, value);
+  }
+
+  public async getDisappearingMode(jid: string): Promise<any> {
+    const resolved = await this.resolveId(jid);
+    if (!resolved) return null;
+    const res = await this.requireZapo().profile.getDisappearingMode([resolved]);
+    return Array.isArray(res) ? res[0] || null : res;
+  }
+
+  public async setDefaultDisappearingMode(seconds: number): Promise<void> {
+    await this.requireZapo().profile.setDisappearingMode(Number(seconds) || 0);
+  }
+
+  public async resolveUsername(username: string): Promise<any> {
+    return await this.requireZapo().profile.resolveUsername({ username });
+  }
+
+  public async getBusinessProfile(jid: string): Promise<any> {
+    const resolved = await this.resolveId(jid);
+    if (!resolved) return null;
+    const res = await this.requireZapo().business.getBusinessProfile([resolved]);
+    return Array.isArray(res) ? res[0] || null : res;
+  }
+
+  public async editBusinessProfile(input: any): Promise<void> {
+    await this.requireZapo().business.editBusinessProfile(input);
+  }
+
+  public async setBroadcastList(id: string, name: string, recipients: string[]): Promise<void> {
+    await this.requireZapo().broadcastList.setList({ id, name, recipients });
+  }
+
+  public async removeBroadcastList(id: string): Promise<void> {
+    await this.requireZapo().broadcastList.removeList(id);
+  }
+
+  public async sendBroadcastList(listJid: string, content: any, recipients: string[]): Promise<any> {
+    return await this.requireZapo().broadcastList.send({ listJid, content, recipients });
   }
 
   public static Browser(
