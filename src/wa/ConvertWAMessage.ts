@@ -36,6 +36,13 @@ import {
   normalizePollJid,
 } from './poll-content';
 
+const IGNORED_MESSAGE_CONTENT_KEYS = new Set([
+  'messageContextInfo',
+  'senderKeyDistributionMessage',
+  'fastRatchetKeySenderKeyDistributionMessage',
+  '$$unknownFieldCount',
+]);
+
 export default class ConvertWAMessage {
   public type?: any;
   public waMessage: any = { key: {} };
@@ -263,13 +270,14 @@ export default class ConvertWAMessage {
   }
 
   /**
-   * Desembrulha os contêineres comuns (temporária, visualização única, documento com legenda),
-   * inclusive combinados, até 5 níveis. Marca `isViewOnce` quando passa por visualização única.
+   * Desembrulha os contêineres comuns (temporária, visualização única, documento com legenda,
+   * envio entre dispositivos, menção de grupo, invocação de bot etc.), inclusive combinados.
+   * Marca `isViewOnce` quando passa por visualização única.
    */
   public unwrapContainers(messageContent: any): any {
     let current = messageContent;
 
-    for (let depth = 0; depth < 5 && current; depth++) {
+    for (let depth = 0; depth < 8 && current && typeof current === 'object'; depth++) {
       const viewOnce =
         current.viewOnceMessage?.message ||
         current.viewOnceMessageV2?.message ||
@@ -283,7 +291,14 @@ export default class ConvertWAMessage {
 
       const inner =
         current.ephemeralMessage?.message ||
-        current.documentWithCaptionMessage?.message;
+        current.documentWithCaptionMessage?.message ||
+        current.groupMentionedMessage?.message ||
+        current.botInvokeMessage?.message ||
+        current.deviceSentMessage?.message ||
+        current.associatedChildMessage?.message ||
+        current.groupStatusMessage?.message ||
+        current.groupStatusMessageV2?.message ||
+        current.botForwardedMessage?.message;
 
       if (!inner) break;
 
@@ -299,7 +314,7 @@ export default class ConvertWAMessage {
       return;
     }
 
-    // Contêineres (temporária, visualização única, documento com legenda)
+    // Contêineres (temporária, visualização única, documento com legenda, deviceSent etc.)
     messageContent = this.unwrapContainers(messageContent);
 
     // Edited message unwrap
@@ -319,8 +334,9 @@ export default class ConvertWAMessage {
     }
 
     const contentType = Object.keys(messageContent).find((key) => {
+      if (IGNORED_MESSAGE_CONTENT_KEYS.has(key)) return false;
       const val = messageContent[key];
-      return val !== null && val !== undefined && key !== 'messageContextInfo';
+      return val !== null && val !== undefined;
     });
 
     if (!contentType) {
@@ -392,6 +408,15 @@ export default class ConvertWAMessage {
 
       if (content.contextInfo) {
         await this.convertContextMessage(content.contextInfo);
+      } else {
+        for (const key of Object.keys(messageContent)) {
+          if (IGNORED_MESSAGE_CONTENT_KEYS.has(key)) continue;
+          const sub = (messageContent as any)[key];
+          if (sub && typeof sub === 'object' && sub.contextInfo) {
+            await this.convertContextMessage(sub.contextInfo);
+            break;
+          }
+        }
       }
     }
   }
@@ -410,22 +435,35 @@ export default class ConvertWAMessage {
     }
 
     if (context.quotedMessage) {
-      const remoteJid = context.remoteJid || this.waMessage.key?.remoteJid || '';
+      const cachedQuoted = context.stanzaId ? this.bot?.getCachedWAMessage?.(context.stanzaId) : undefined;
+      const remoteJid = context.remoteJid || cachedQuoted?.key?.remoteJid || this.waMessage.key?.remoteJid || '';
+      const resolvedParticipant = context.participant
+        ? await (typeof this.bot?.resolveId === 'function'
+            ? this.bot.resolveId(context.participant)
+            : Promise.resolve(this.bot?.canonicalId?.(context.participant) || normalizeJid(context.participant)))
+        : '';
       const quotedFromMe =
-        !!context.participant &&
-        this.bot?.canonicalId?.(context.participant) === this.bot?.id;
+        !!cachedQuoted?.key?.fromMe ||
+        (!!resolvedParticipant && resolvedParticipant === this.bot?.id);
 
-      const message = {
-        key: {
-          remoteJid,
-          participant: isGroupJid(normalizeJid(remoteJid)) ? context.participant : undefined,
-          fromMe: quotedFromMe,
-          id: context.stanzaId,
-        },
-        message: context.quotedMessage,
-      };
+      const quotedPayload =
+        Object.keys(context.quotedMessage).length > 0
+          ? context.quotedMessage
+          : cachedQuoted?.message;
 
-      this.message.mention = await new ConvertWAMessage(this.bot, message).get();
+      if (quotedPayload) {
+        const message = {
+          key: {
+            remoteJid,
+            participant: isGroupJid(normalizeJid(remoteJid)) ? (context.participant || cachedQuoted?.key?.participant) : undefined,
+            fromMe: quotedFromMe,
+            id: context.stanzaId || cachedQuoted?.key?.id,
+          },
+          message: quotedPayload,
+        };
+
+        this.message.mention = await new ConvertWAMessage(this.bot, message).get();
+      }
     }
   }
 
@@ -554,7 +592,7 @@ export default class ConvertWAMessage {
     }
 
     msg.isGIF = !!content.gifPlayback;
-    msg.name = content.fileName || msg.name;
+    msg.name = content.fileName || content.title || msg.name;
     msg.mimetype = content.mimetype || msg.mimetype;
     msg.size = toMediaNumber(content.fileLength);
     msg.width = toMediaNumber(content.width);

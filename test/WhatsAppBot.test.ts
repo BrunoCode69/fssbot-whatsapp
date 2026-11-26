@@ -8,8 +8,11 @@ import { createInteractiveListPayload } from '../src/wa/interactive-list-payload
 import { extractInteractiveListSelection } from '../src/wa/list-selection';
 import { getPollCreationContent, getPollCreatorJid, getPollVoterId, getPollVoteChange } from '../src/wa/poll-content';
 import ContactMessage from '../src/messages/ContactMessage';
+import FileMessage from '../src/messages/FileMessage';
 import AudioMessage from '../src/messages/AudioMessage';
+import ConvertWAMessage from '../src/wa/ConvertWAMessage';
 import ConvertToWAMessage, { normalizeWhatsAppAudioMimetype } from '../src/wa/ConvertToWAMessage';
+import { resolveDownloadMediaInput } from '../src/wa/WhatsAppBot';
 import ListMessage from '../src/messages/ListMessage';
 import PollMessage from '../src/messages/PollMessage';
 import Message from '../src/messages/Message';
@@ -275,6 +278,122 @@ describe('WhatsApp AudioMessage conversion', () => {
       mimetype: 'audio/mp4',
       seconds: 185,
     });
+  });
+});
+
+describe('WhatsApp quoted media & mention conversion', () => {
+  test('skips senderKeyDistributionMessage in group messages and extracts quoted .ehi FileMessage for Zapo media download', async () => {
+    const { resolveMediaPayload } = require('../node_modules/zapo-js/dist/message/encode/media-payload.js');
+    const fakeBot = {
+      id: '5511000000000@s.whatsapp.net',
+      resolveId: async (jid: string) => jid,
+      canonicalId: (jid: string) => jid,
+      extractAndMapLID: () => ({ id: '' }),
+    } as any;
+
+    const mediaKey = new Uint8Array(32).fill(7);
+    const incomingGroupReply = {
+      key: {
+        remoteJid: '120363000000000000@g.us',
+        participant: '5511999999999@s.whatsapp.net',
+        id: 'reply-msg-1',
+        fromMe: false,
+      },
+      message: {
+        senderKeyDistributionMessage: {
+          groupId: '120363000000000000@g.us',
+          axolotlSenderKeyDistributionMessage: new Uint8Array([1, 2, 3]),
+        },
+        extendedTextMessage: {
+          text: '/decrypt',
+          contextInfo: {
+            stanzaId: 'quoted-doc-id',
+            participant: '5511888888888@s.whatsapp.net',
+            mentionedJid: ['5511888888888@s.whatsapp.net'],
+            quotedMessage: {
+              documentWithCaptionMessage: {
+                message: {
+                  documentMessage: {
+                    fileName: 'vivo.ehi',
+                    mimetype: 'text/plain',
+                    directPath: '/v/t62.7119-24/abc',
+                    mediaKey,
+                    fileLength: 256,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const converted = await new ConvertWAMessage(fakeBot, incomingGroupReply).get();
+    expect(converted.text).toBe('/decrypt');
+    expect(converted.mentions).toEqual(['5511888888888@s.whatsapp.net']);
+    expect(FileMessage.isValid(converted.mention)).toBe(true);
+
+    const quotedDoc = converted.mention as FileMessage;
+    expect(quotedDoc.name).toBe('vivo.ehi');
+    expect(quotedDoc.mimetype).toBe('text/plain');
+    expect(quotedDoc.id).toBe('quoted-doc-id');
+
+    const zapoInput = resolveDownloadMediaInput((quotedDoc.file as any).stream);
+    const payload = resolveMediaPayload(zapoInput);
+    expect(payload).not.toBeNull();
+    expect(payload.mediaType).toBe('document');
+    expect(payload.directPath).toBe('/v/t62.7119-24/abc');
+  });
+
+  test('unwraps deviceSentMessage and uses cached message fallback when quotedMessage is empty', async () => {
+    const mediaKey = new Uint8Array(32).fill(9);
+    const cachedOriginal = {
+      key: { remoteJid: '5511999999999@s.whatsapp.net', id: 'cached-id-1', fromMe: false },
+      message: {
+        deviceSentMessage: {
+          destinationJid: '5511999999999@s.whatsapp.net',
+          message: {
+            documentMessage: {
+              title: 'servidor.ehi',
+              mimetype: 'application/octet-stream',
+              directPath: '/v/t62.7119-24/cached',
+              mediaKey,
+            },
+          },
+        },
+      },
+    };
+    const fakeBot = {
+      id: '5511000000000@s.whatsapp.net',
+      resolveId: async (jid: string) => jid,
+      canonicalId: (jid: string) => jid,
+      extractAndMapLID: () => ({ id: '' }),
+      getCachedWAMessage: (id?: string) => (id === 'cached-id-1' ? cachedOriginal : undefined),
+    } as any;
+
+    const incoming = {
+      key: { remoteJid: '5511999999999@s.whatsapp.net', id: 'cmd-1', fromMe: false },
+      message: {
+        deviceSentMessage: {
+          destinationJid: '5511999999999@s.whatsapp.net',
+          message: {
+            extendedTextMessage: {
+              text: '/decrypt',
+              contextInfo: {
+                stanzaId: 'cached-id-1',
+                participant: '5511999999999@s.whatsapp.net',
+                quotedMessage: {},
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const converted = await new ConvertWAMessage(fakeBot, incoming).get();
+    expect(converted.text).toBe('/decrypt');
+    expect(FileMessage.isValid(converted.mention)).toBe(true);
+    expect((converted.mention as FileMessage).name).toBe('servidor.ehi');
   });
 });
 

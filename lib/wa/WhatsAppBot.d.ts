@@ -147,6 +147,12 @@ export type WAJoinRequest = {
 };
 /** Tempo de fixação aceito pelo WhatsApp: 24 horas, 7 dias ou 30 dias. */
 export type WAPinDuration = 86400 | 604800 | 2592000;
+/**
+ * Extrai a entrada aceita por `zapo.downloadMediaMessage`: eventos reais trazem `rawNode`,
+ * enquanto mensagens citadas/construídas localmente trazem `{ key, message }` sem `rawNode`
+ * e precisam passar `source.message` diretamente para `resolveMediaPayload` enxergar a mídia.
+ */
+export declare function resolveDownloadMediaInput(source: any): any;
 export default class WhatsAppBot extends BotEvents implements IBot {
     /** Versão do WhatsApp Web obtida em tempo de execução (compartilhada entre instâncias). */
     private static latestVersion?;

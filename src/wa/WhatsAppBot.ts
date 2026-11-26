@@ -233,6 +233,18 @@ export type WAPinDuration = 86400 | 604800 | 2592000;
 /** Tempo de escrita atrasada dos registros de chat/usuário (agrupa várias alterações numa só gravação). */
 const RECORD_FLUSH_DELAY_MS = 1500;
 
+/**
+ * Extrai a entrada aceita por `zapo.downloadMediaMessage`: eventos reais trazem `rawNode`,
+ * enquanto mensagens citadas/construídas localmente trazem `{ key, message }` sem `rawNode`
+ * e precisam passar `source.message` diretamente para `resolveMediaPayload` enxergar a mídia.
+ */
+export function resolveDownloadMediaInput(source: any): any {
+  if (!source || typeof source !== 'object') return source;
+  if ('rawNode' in source) return source;
+  if (source.message && typeof source.message === 'object') return source.message;
+  return source;
+}
+
 export default class WhatsAppBot extends BotEvents implements IBot {
   /** Versão do WhatsApp Web obtida em tempo de execução (compartilhada entre instâncias). */
   private static latestVersion?: { version: WAVersion; fetchedAt: number };
@@ -2025,7 +2037,7 @@ export default class WhatsAppBot extends BotEvents implements IBot {
       return await this.experimentalDownloadMediaMessage(media);
     }
 
-    const stream: any = await (downloadMediaMessage as any)(media.stream);
+    const stream: any = await (downloadMediaMessage as any)(resolveDownloadMediaInput(media.stream));
     if (stream && typeof stream[Symbol.asyncIterator] === 'function') {
       const chunks: Buffer[] = [];
       for await (const chunk of stream) {
@@ -2048,7 +2060,7 @@ export default class WhatsAppBot extends BotEvents implements IBot {
 
     while (count < (maxRetryCount || this.config.maxMsgRetryCount || 5)) {
       try {
-        const stream: any = await (downloadMediaMessage as any)(media.stream);
+        const stream: any = await (downloadMediaMessage as any)(resolveDownloadMediaInput(media.stream));
         if (stream && typeof stream[Symbol.asyncIterator] === 'function') {
           const chunks: Buffer[] = [];
           for await (const chunk of stream) {
@@ -2082,7 +2094,7 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     options?: any,
     ctx?: any,
   ): Promise<any> {
-    const stream: any = await (downloadMediaMessage as any)(message as any, options);
+    const stream: any = await (downloadMediaMessage as any)(resolveDownloadMediaInput(message) as any, options);
     if (type === 'stream') return stream;
     if (stream && typeof stream[Symbol.asyncIterator] === 'function') {
       const chunks: Buffer[] = [];

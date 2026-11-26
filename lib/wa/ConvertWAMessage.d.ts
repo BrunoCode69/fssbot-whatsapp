@@ -14,8 +14,9 @@ export default class ConvertWAMessage {
      */
     convertAddonMessage(addon: any): Promise<void>;
     /**
-     * Desembrulha os contêineres comuns (temporária, visualização única, documento com legenda),
-     * inclusive combinados, até 5 níveis. Marca `isViewOnce` quando passa por visualização única.
+     * Desembrulha os contêineres comuns (temporária, visualização única, documento com legenda,
+     * envio entre dispositivos, menção de grupo, invocação de bot etc.), inclusive combinados.
+     * Marca `isViewOnce` quando passa por visualização única.
      */
     unwrapContainers(messageContent: any): any;
     convertContentMessage(messageContent: any): Promise<void>;
