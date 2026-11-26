@@ -206,3 +206,65 @@ export type NewsletterEvent = {
   action: string;
   raw: unknown;
 };
+
+/** [Discord] Interação de barra (`/comando`), botão ou select menu. */
+export type DiscordInteractionEvent = {
+  interactionId: string;
+  kind: 'slash' | 'button' | 'select';
+  commandName?: string;
+  subcommand?: string;
+  customId?: string;
+  values?: string[];
+  options?: Record<string, any>;
+  guildId?: string;
+  channelId: string;
+  chat: Chat;
+  user: User;
+  raw?: unknown;
+};
+
+/** [Discord] Submissão de modal (`ModalBuilder`). */
+export type DiscordModalEvent = {
+  interactionId: string;
+  modalId: string;
+  fields: Record<string, string>;
+  guildId?: string;
+  channelId: string;
+  chat: Chat;
+  user: User;
+  raw?: unknown;
+};
+
+/** [Discord] Mudança em canal de voz (`voiceStateUpdate`). */
+export type DiscordVoiceEvent = {
+  action: 'join' | 'leave' | 'switch' | 'update';
+  guildId: string;
+  channelId: string;
+  oldChannelId?: string;
+  selfMute: boolean;
+  selfDeaf: boolean;
+  serverMute: boolean;
+  serverDeaf: boolean;
+  chat: Chat;
+  user: User;
+};
+
+/** [Discord] Mensagem apagada (`messageDelete`). */
+export type DiscordMessageDeleteEvent = {
+  messageId: string;
+  channelId: string;
+  guildId?: string;
+  text: string;
+  chat: Chat;
+  user: User;
+};
+
+/** [Discord] Cargo criado, atualizado ou excluído. */
+export type DiscordRoleUpdateEvent = {
+  action: 'create' | 'update' | 'delete';
+  guildId: string;
+  roleId: string;
+  roleName: string;
+  color: string;
+  chat: Chat;
+};

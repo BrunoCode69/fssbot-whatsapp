@@ -26,6 +26,8 @@ export interface ListItem {
   description?: string;
   /** Cabeçalho do item (opcional) */
   header?: string;
+  /** Emoji opcional exibido no item (Discord) */
+  emoji?: string;
 }
 
 /**
@@ -64,6 +66,15 @@ export default class ListMessage extends Message {
 
   /** Se deve usar modo interativo (apenas Mobile) */
   public interactiveMode: boolean = false;
+
+  /** Tipo de seletor no Discord ('string' | 'user' | 'role' | 'channel' | 'mentionable') */
+  public selectType?: string;
+
+  /** Quantidade mínima de itens selecionáveis no Discord */
+  public minValues?: number;
+
+  /** Quantidade máxima de itens selecionáveis no Discord */
+  public maxValues?: number;
 
   /**
    * Cria uma nova instância de ListMessage.

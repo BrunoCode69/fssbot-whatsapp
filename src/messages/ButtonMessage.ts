@@ -28,6 +28,10 @@ export interface Button {
   text: string;
   /** Conteúdo do botão (ID, URL, telefone) */
   content: string;
+  /** Estilo visual (ex: Discord primary, secondary, success, danger) */
+  style?: string;
+  /** Emoji opcional exibido no botão (Discord) */
+  emoji?: string;
 }
 
 /**
@@ -68,11 +72,13 @@ export default class ButtonMessage extends Message {
    * @param text - Texto do botão
    * @param id - ID da resposta rápida
    */
-  public addReply(text: string, id: string) {
+  public addReply(text: string, id: string, style?: string, emoji?: string) {
     this.buttons.push({
       type: ButtonType.Reply,
       text,
       content: id,
+      ...(style ? { style } : {}),
+      ...(emoji ? { emoji } : {}),
     });
 
     return this;

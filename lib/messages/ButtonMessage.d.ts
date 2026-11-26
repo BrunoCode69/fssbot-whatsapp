@@ -25,6 +25,10 @@ export interface Button {
     text: string;
     /** Conteúdo do botão (ID, URL, telefone) */
     content: string;
+    /** Estilo visual (ex: Discord primary, secondary, success, danger) */
+    style?: string;
+    /** Emoji opcional exibido no botão (Discord) */
+    emoji?: string;
 }
 /**
  * Representa uma mensagem com botões
@@ -49,7 +53,7 @@ export default class ButtonMessage extends Message {
      * @param text - Texto do botão
      * @param id - ID da resposta rápida
      */
-    addReply(text: string, id: string): this;
+    addReply(text: string, id: string, style?: string, emoji?: string): this;
     /**
      * Adiciona um botão de URL
      * @param text - Texto do botão

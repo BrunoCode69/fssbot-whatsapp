@@ -3,6 +3,7 @@ import { proto } from "zapo-js";
 export * from "./bot/index";
 export * from "./client/index";
 export * from "./configs/index";
+export * from "./discord/index";
 export * from "./messages/index";
 export * from "./modules/chat/index";
 export * from "./modules/user/index";

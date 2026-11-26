@@ -6,7 +6,7 @@ import Chat from '../modules/chat/Chat';
 import User from '../modules/user/User';
 import Call from '../models/Call';
 import Message from '../messages/Message';
-import type { BlocklistEvent, ChatStateEvent, GroupJoinRequestEvent, GroupUpdateEvent, IdMappingEvent, InlineQueryEvent, MessageProtocolEvent, MessageReactionEvent, MessageUnavailableEvent, NewsletterEvent, PaymentSuccessEvent, PictureEvent, PreCheckoutQueryEvent, PresenceEvent, ReceiptEvent } from './BotEventTypes';
+import type { BlocklistEvent, ChatStateEvent, DiscordInteractionEvent, DiscordMessageDeleteEvent, DiscordModalEvent, DiscordRoleUpdateEvent, DiscordVoiceEvent, GroupJoinRequestEvent, GroupUpdateEvent, IdMappingEvent, InlineQueryEvent, MessageProtocolEvent, MessageReactionEvent, MessageUnavailableEvent, NewsletterEvent, PaymentSuccessEvent, PictureEvent, PreCheckoutQueryEvent, PresenceEvent, ReceiptEvent } from './BotEventTypes';
 /**
  * Mapeia os eventos disponíveis para um bot.
  */
@@ -82,8 +82,18 @@ export type BotEventsMap = {
     'pre-checkout-query': PreCheckoutQueryEvent;
     /** [Telegram] Pagamento aprovado (`successful_payment`). */
     'payment-success': PaymentSuccessEvent;
-    /** [Telegram] Reação nativa em mensagem (`message_reaction`). */
+    /** [Telegram / Discord] Reação nativa em mensagem. */
     'message-reaction': MessageReactionEvent;
+    /** [Discord] Interação de comando slash, botão ou menu. */
+    'discord-interaction': DiscordInteractionEvent;
+    /** [Discord] Envio de formulário Modal. */
+    'discord-modal': DiscordModalEvent;
+    /** [Discord] Atualização de estado de voz. */
+    'discord-voice': DiscordVoiceEvent;
+    /** [Discord] Mensagem apagada. */
+    'discord-message-delete': DiscordMessageDeleteEvent;
+    /** [Discord] Cargo criado, editado ou apagado. */
+    'discord-role-update': DiscordRoleUpdateEvent;
     /** Ocorre quando um erro é detectado. */
     error: Error;
 };

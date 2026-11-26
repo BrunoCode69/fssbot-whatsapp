@@ -13,6 +13,11 @@ import Message from '../messages/Message';
 import type {
   BlocklistEvent,
   ChatStateEvent,
+  DiscordInteractionEvent,
+  DiscordMessageDeleteEvent,
+  DiscordModalEvent,
+  DiscordRoleUpdateEvent,
+  DiscordVoiceEvent,
   GroupJoinRequestEvent,
   GroupUpdateEvent,
   IdMappingEvent,
@@ -187,8 +192,23 @@ export type ClientEventsMap = {
   /** [Telegram] Pagamento aprovado (`successful_payment`). */
   'payment-success': PaymentSuccessEvent;
 
-  /** [Telegram] Reação em mensagem (`message_reaction`). */
+  /** [Telegram / Discord] Reação nativa em mensagem. */
   'message-reaction': MessageReactionEvent;
+
+  /** [Discord] Interação de slash command, botão ou select menu. */
+  'discord-interaction': DiscordInteractionEvent;
+
+  /** [Discord] Submissão de Modal. */
+  'discord-modal': DiscordModalEvent;
+
+  /** [Discord] Atualização de canal de voz. */
+  'discord-voice': DiscordVoiceEvent;
+
+  /** [Discord] Mensagem apagada. */
+  'discord-message-delete': DiscordMessageDeleteEvent;
+
+  /** [Discord] Cargo atualizado. */
+  'discord-role-update': DiscordRoleUpdateEvent;
 
   /**
    * Evento de erro ocorrido.

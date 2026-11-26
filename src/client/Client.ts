@@ -330,6 +330,60 @@ export default class Client<Bot extends IBot = IBot>
         this.emit('error', getError(err));
       }
     });
+    this.bot.on('discord-interaction', (update) => {
+      try {
+        this.emit('discord-interaction', {
+          ...update,
+          chat: Chat.apply(update.chat, link),
+          user: User.apply(update.user, link),
+        });
+      } catch (err) {
+        this.emit('error', getError(err));
+      }
+    });
+    this.bot.on('discord-modal', (update) => {
+      try {
+        this.emit('discord-modal', {
+          ...update,
+          chat: Chat.apply(update.chat, link),
+          user: User.apply(update.user, link),
+        });
+      } catch (err) {
+        this.emit('error', getError(err));
+      }
+    });
+    this.bot.on('discord-voice', (update) => {
+      try {
+        this.emit('discord-voice', {
+          ...update,
+          chat: Chat.apply(update.chat, link),
+          user: User.apply(update.user, link),
+        });
+      } catch (err) {
+        this.emit('error', getError(err));
+      }
+    });
+    this.bot.on('discord-message-delete', (update) => {
+      try {
+        this.emit('discord-message-delete', {
+          ...update,
+          chat: Chat.apply(update.chat, link),
+          user: User.apply(update.user, link),
+        });
+      } catch (err) {
+        this.emit('error', getError(err));
+      }
+    });
+    this.bot.on('discord-role-update', (update) => {
+      try {
+        this.emit('discord-role-update', {
+          ...update,
+          chat: Chat.apply(update.chat, link),
+        });
+      } catch (err) {
+        this.emit('error', getError(err));
+      }
+    });
 
     this.bot.on('error', (err) => {
       try {
@@ -1397,6 +1451,102 @@ export default class Client<Bot extends IBot = IBot>
   public reopenForumTopic(chat: Chat | string, threadId: number): Promise<boolean> {
     const chatId = typeof chat === 'string' ? chat : chat?.id || '';
     return this.callBot('reopenForumTopic', chatId, threadId);
+  }
+
+  // ==================== DISCORD ====================
+
+  public replyInteraction(interactionId: string, content: any, ephemeral: boolean = false): Promise<any> {
+    return this.callBot('replyInteraction', interactionId, content, ephemeral);
+  }
+  public deferInteraction(interactionId: string, ephemeral: boolean = false): Promise<void> {
+    return this.callBot('deferInteraction', interactionId, ephemeral);
+  }
+  public showDiscordModal(interactionId: string, modalSpec: any): Promise<void> {
+    return this.callBot('showDiscordModal', interactionId, modalSpec);
+  }
+  public registerSlashCommands(commands: any[], guildId?: string): Promise<any> {
+    return this.callBot('registerSlashCommands', commands, guildId);
+  }
+  public setBotActivity(text: string, type?: string, status?: 'online' | 'idle' | 'dnd' | 'invisible'): Promise<void> {
+    return this.callBot('setBotActivity', text, type, status);
+  }
+  public addRoleToUser(guildOrChannelId: string, userId: string, roleId: string): Promise<void> {
+    return this.callBot('addRoleToUser', guildOrChannelId, userId, roleId);
+  }
+  public removeRoleFromUser(guildOrChannelId: string, userId: string, roleId: string): Promise<void> {
+    return this.callBot('removeRoleFromUser', guildOrChannelId, userId, roleId);
+  }
+  public userHasRole(guildOrChannelId: string, userId: string, roleId: string): Promise<boolean> {
+    return this.callBot('userHasRole', guildOrChannelId, userId, roleId);
+  }
+  public getMemberRoles(guildOrChannelId: string, userId: string): Promise<string[]> {
+    return this.callBot('getMemberRoles', guildOrChannelId, userId);
+  }
+  public createGuildRole(guildOrChannelId: string, name: string, color?: string, hoist?: boolean, mentionable?: boolean): Promise<string> {
+    return this.callBot('createGuildRole', guildOrChannelId, name, color, hoist, mentionable);
+  }
+  public deleteGuildRole(guildOrChannelId: string, roleId: string): Promise<void> {
+    return this.callBot('deleteGuildRole', guildOrChannelId, roleId);
+  }
+  public userHasPermission(guildOrChannelId: string, userId: string, permission: string): Promise<boolean> {
+    return this.callBot('userHasPermission', guildOrChannelId, userId, permission);
+  }
+  public timeoutMember(guildOrChannelId: string, userId: string, seconds: number, reason?: string): Promise<void> {
+    return this.callBot('timeoutMember', guildOrChannelId, userId, seconds, reason);
+  }
+  public kickMember(guildOrChannelId: string, userId: string, reason?: string): Promise<void> {
+    return this.callBot('kickMember', guildOrChannelId, userId, reason);
+  }
+  public banGuildMember(guildOrChannelId: string, userId: string, deleteMessageSeconds?: number, reason?: string): Promise<void> {
+    return this.callBot('banGuildMember', guildOrChannelId, userId, deleteMessageSeconds, reason);
+  }
+  public unbanGuildMember(guildOrChannelId: string, userId: string): Promise<void> {
+    return this.callBot('unbanGuildMember', guildOrChannelId, userId);
+  }
+  public setMemberNickname(guildOrChannelId: string, userId: string, nickname: string): Promise<void> {
+    return this.callBot('setMemberNickname', guildOrChannelId, userId, nickname);
+  }
+  public purgeMessages(channelId: string, count: number): Promise<number> {
+    return this.callBot('purgeMessages', channelId, count);
+  }
+  public createGuildChannel(guildOrChannelId: string, name: string, type?: string, parentId?: string): Promise<string> {
+    return this.callBot('createGuildChannel', guildOrChannelId, name, type, parentId);
+  }
+  public deleteGuildChannel(channelId: string): Promise<void> {
+    return this.callBot('deleteGuildChannel', channelId);
+  }
+  public setChannelTopic(channelId: string, topic: string): Promise<void> {
+    return this.callBot('setChannelTopic', channelId, topic);
+  }
+  public setChannelSlowmode(channelId: string, seconds: number): Promise<void> {
+    return this.callBot('setChannelSlowmode', channelId, seconds);
+  }
+  public setChannelPermission(channelId: string, targetId: string, allow: boolean, permission: string): Promise<void> {
+    return this.callBot('setChannelPermission', channelId, targetId, allow, permission);
+  }
+  public createThread(channelId: string, name: string, messageId?: string, autoArchiveMinutes?: number): Promise<string> {
+    return this.callBot('createThread', channelId, name, messageId, autoArchiveMinutes);
+  }
+  public archiveThread(threadId: string, archived?: boolean): Promise<void> {
+    return this.callBot('archiveThread', threadId, archived);
+  }
+  public lockThread(threadId: string, locked?: boolean): Promise<void> {
+    return this.callBot('lockThread', threadId, locked);
+  }
+  public sendDiscordWebhook(url: string, content: any, username?: string, avatarURL?: string): Promise<any> {
+    return this.callBot('sendDiscordWebhook', url, content, username, avatarURL);
+  }
+  public moveVoiceMember(guildOrChannelId: string, userId: string, voiceChannelId: string): Promise<void> {
+    return this.callBot('moveVoiceMember', guildOrChannelId, userId, voiceChannelId);
+  }
+  public muteVoiceMember(guildOrChannelId: string, userId: string, muted?: boolean): Promise<void> {
+    return this.callBot('muteVoiceMember', guildOrChannelId, userId, muted);
+  }
+  public deafenVoiceMember(guildOrChannelId: string, userId: string, deafened?: boolean): Promise<void> {
+    return this.callBot('deafenVoiceMember', guildOrChannelId, userId, deafened);
+  }
+  public disconnectVoiceMember(guildOrChannelId: string, userId: string): Promise<void> {
+    return this.callBot('disconnectVoiceMember', guildOrChannelId, userId);
   }
 
   public static getClients(): Record<string, Client<IBot>> {
