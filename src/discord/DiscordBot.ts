@@ -37,7 +37,8 @@ import ListMessage from '../messages/ListMessage';
 import LocationMessage from '../messages/LocationMessage';
 import MediaMessage, { type Media } from '../messages/MediaMessage';
 import Message, { MessageType } from '../messages/Message';
-import PollMessage from '../messages/PollMessage';
+import PollMessage, { PollAction } from '../messages/PollMessage';
+import PollUpdateMessage from '../messages/PollUpdateMessage';
 import ReactionMessage from '../messages/ReactionMessage';
 import TextMessage from '../messages/TextMessage';
 import VideoMessage from '../messages/VideoMessage';
@@ -264,6 +265,7 @@ export default class DiscordBot extends BotEvents implements IBot {
 
   private interactions = new Map<string, { interaction: any; createdAt: number }>();
   private answeredInteractions = new Set<string>();
+  private clientDestroyed = false;
 
   constructor(options: DiscordBotOptions = {}) {
     super();
@@ -277,8 +279,21 @@ export default class DiscordBot extends BotEvents implements IBot {
       intents,
       partials: [Partials.Channel, Partials.Message, Partials.Reaction, Partials.GuildMember, Partials.User],
     });
+    this.clientDestroyed = false;
     this.attachEvents(client);
     return client;
+  }
+
+  private buildGuildMeta(guild: any, channel?: any) {
+    return {
+      guildId: guild?.id ? String(guild.id) : '',
+      guildName: String(guild?.name || ''),
+      guildIcon: typeof guild?.iconURL === 'function' ? guild.iconURL() || '' : '',
+      guildMemberCount: Number(guild?.memberCount ?? 0),
+      guildOwnerId: String(guild?.ownerId || ''),
+      channelId: channel?.id ? String(channel.id) : '',
+      channelName: String(channel?.name || ''),
+    };
   }
 
   private storeInteraction(interaction: any): string {
@@ -343,10 +358,12 @@ export default class DiscordBot extends BotEvents implements IBot {
     client.on(Events.MessageDelete, (dMsg) => {
       const chat = this.toRompotChat(dMsg.channel, dMsg.guild);
       const user = dMsg.author ? this.toRompotUser(dMsg.author, dMsg.member) : new User('');
+      const meta = this.buildGuildMeta(dMsg.guild, dMsg.channel);
       this.emit('discord-message-delete', {
+        ...meta,
         messageId: String(dMsg.id || ''),
-        channelId: String(dMsg.channelId || ''),
-        guildId: dMsg.guildId ? String(dMsg.guildId) : undefined,
+        channelId: String(dMsg.channelId || meta.channelId),
+        guildId: dMsg.guildId ? String(dMsg.guildId) : meta.guildId || undefined,
         text: String(dMsg.content || ''),
         chat,
         user,
@@ -358,10 +375,13 @@ export default class DiscordBot extends BotEvents implements IBot {
       if (reaction.partial) {
         try { reaction = await reaction.fetch(); } catch {}
       }
-      const chat = this.toRompotChat(reaction.message?.channel, reaction.message?.guild);
+      const channel = reaction.message?.channel;
+      const guild = reaction.message?.guild;
+      const chat = this.toRompotChat(channel, guild);
       const user = this.toRompotUser(dUser);
       const emoji = String(reaction.emoji?.name || reaction.emoji?.id || '');
       this.emit('message-reaction', {
+        ...this.buildGuildMeta(guild, channel),
         chat,
         user,
         messageId: String(reaction.message?.id || ''),
@@ -378,44 +398,90 @@ export default class DiscordBot extends BotEvents implements IBot {
       void handleReaction(reaction, dUser, false);
     });
 
+    const handlePollVote = async (pollAnswer: any, userId: string, isAdd: boolean) => {
+      if (String(userId) === this.id) return;
+      const message = pollAnswer?.poll?.message;
+      const channel = message?.channel;
+      const guild = message?.guild;
+      const chat = this.toRompotChat(channel || { id: message?.channelId || '', type: guild ? ChannelType.GuildText : ChannelType.DM }, guild);
+      const dUser = await this.discord.users.fetch(String(userId)).catch(() => ({ id: String(userId) }));
+      if ((dUser as any)?.bot) return;
+      const user = this.toRompotUser(dUser);
+      const answerId = String(pollAnswer?.id ?? '');
+      const answerText = String(pollAnswer?.text || answerId);
+      const msgId = String(message?.id || '');
+      const pollUpdate = PollUpdateMessage.fromJSON({
+        type: MessageType.PollUpdate,
+        id: msgId,
+        chat,
+        user,
+        selected: answerText || answerId,
+        text: answerText,
+        action: isAdd ? PollAction.Add : PollAction.Remove,
+        extra: {
+          ...this.buildGuildMeta(guild, channel),
+          pollCreationMessageId: msgId,
+          pollId: msgId,
+          answerId,
+        },
+      });
+      this.emit('message', pollUpdate);
+    };
+    if ((Events as any).MessagePollVoteAdd) {
+      client.on((Events as any).MessagePollVoteAdd, (pollAnswer: any, userId: string) => {
+        void handlePollVote(pollAnswer, userId, true);
+      });
+    }
+    if ((Events as any).MessagePollVoteRemove) {
+      client.on((Events as any).MessagePollVoteRemove, (pollAnswer: any, userId: string) => {
+        void handlePollVote(pollAnswer, userId, false);
+      });
+    }
+
     client.on(Events.GuildMemberAdd, (member) => {
       const chat = new Chat(String(member.guild?.id || ''), ChatType.Group);
       chat.name = member.guild?.name || '';
       const user = this.toRompotUser(member.user, member);
+      const meta = this.buildGuildMeta(member.guild);
       this.emit('user', {
+        ...meta,
         action: 'join' as UserAction,
         event: 'add' as UserEvent,
         chat,
         user,
         fromUser: user,
-      });
+      } as any);
       this.emit('user', {
+        ...meta,
         action: 'add' as UserAction,
         event: 'add' as UserEvent,
         chat,
         user,
         fromUser: user,
-      });
+      } as any);
     });
 
     client.on(Events.GuildMemberRemove, (member) => {
       const chat = new Chat(String(member.guild?.id || ''), ChatType.Group);
       chat.name = member.guild?.name || '';
       const user = this.toRompotUser(member.user, member);
+      const meta = this.buildGuildMeta(member.guild);
       this.emit('user', {
+        ...meta,
         action: 'leave' as UserAction,
         event: 'remove' as UserEvent,
         chat,
         user,
         fromUser: user,
-      });
+      } as any);
       this.emit('user', {
+        ...meta,
         action: 'remove' as UserAction,
         event: 'remove' as UserEvent,
         chat,
         user,
         fromUser: user,
-      });
+      } as any);
     });
 
     client.on(Events.VoiceStateUpdate, (oldState, newState) => {
@@ -434,6 +500,7 @@ export default class DiscordBot extends BotEvents implements IBot {
       const chat = new Chat(newChannelId || oldChannelId || String(guild?.id || ''), ChatType.Group);
       chat.name = channel?.name || guild?.name || '';
       this.emit('discord-voice', {
+        ...this.buildGuildMeta(guild, channel),
         action,
         guildId: String(guild?.id || ''),
         channelId: newChannelId,
@@ -450,12 +517,17 @@ export default class DiscordBot extends BotEvents implements IBot {
     const emitRole = (role: any, action: 'create' | 'update' | 'delete') => {
       const chat = new Chat(String(role.guild?.id || ''), ChatType.Group);
       chat.name = role.guild?.name || '';
+      const roleId = String(role.id || '');
+      const roleName = String(role.name || '');
+      const color = String(role.hexColor || '');
       this.emit('discord-role-update', {
+        ...this.buildGuildMeta(role.guild),
         action,
         guildId: String(role.guild?.id || ''),
-        roleId: String(role.id || ''),
-        roleName: String(role.name || ''),
-        color: String(role.hexColor || ''),
+        roleId,
+        roleName,
+        color,
+        role: { id: roleId, name: roleName, color },
         chat,
       });
     };
@@ -465,6 +537,26 @@ export default class DiscordBot extends BotEvents implements IBot {
 
     client.on(Events.InteractionCreate, async (interaction) => {
       await this.handleInteraction(interaction);
+    });
+
+    client.on(Events.ShardDisconnect, (closeEvent) => {
+      this.status = BotStatus.Offline;
+      this.emit('close', { reason: closeEvent?.code ?? 'disconnect' });
+    });
+
+    client.on(Events.ShardReconnecting, () => {
+      this.emit('reconnecting', {});
+    });
+
+    client.on(Events.ShardResume, () => {
+      this.status = BotStatus.Online;
+      this.emit('open', { isNewLogin: false });
+    });
+
+    client.on(Events.Invalidated, () => {
+      this.status = BotStatus.Offline;
+      this.clientDestroyed = true;
+      this.emit('stop', { isLogout: true, reason: 'invalidated' });
     });
 
     client.on(Events.Error, (err) => {
@@ -478,12 +570,9 @@ export default class DiscordBot extends BotEvents implements IBot {
     const chat = this.toRompotChat(channel, interaction.guild);
     const user = this.toRompotUser(interaction.user, interaction.member);
     const guildMeta = {
-      guildId: interaction.guildId ? String(interaction.guildId) : '',
-      guildName: String(interaction.guild?.name || ''),
-      guildIcon: interaction.guild?.iconURL() || '',
-      guildMemberCount: Number(interaction.guild?.memberCount ?? 0),
+      ...this.buildGuildMeta(interaction.guild, channel),
       channelId: String(interaction.channelId || ''),
-      channelName: String(channel?.name || ''),
+      userTag: String(interaction.user?.tag || interaction.user?.username || ''),
       interactionId,
     };
 
@@ -504,6 +593,7 @@ export default class DiscordBot extends BotEvents implements IBot {
       const subcommand = interaction.options.getSubcommand(false) || undefined;
       const commandText = `/${interaction.commandName}${argParts.length ? ` ${argParts.join(' ')}` : ''}`;
 
+      this.scheduleAutoDefer(interactionId, interaction, 'reply');
       this.emit('discord-interaction', {
         interactionId,
         kind: 'slash',
@@ -545,7 +635,7 @@ export default class DiscordBot extends BotEvents implements IBot {
           messageId: String(interaction.message?.id || ''),
         },
       });
-      this.scheduleAutoDefer(interactionId, interaction);
+      this.scheduleAutoDefer(interactionId, interaction, 'update');
       this.emit('discord-interaction', {
         interactionId,
         kind: 'button',
@@ -574,7 +664,7 @@ export default class DiscordBot extends BotEvents implements IBot {
           listMessageId: String(interaction.message?.id || ''),
         },
       });
-      this.scheduleAutoDefer(interactionId, interaction);
+      this.scheduleAutoDefer(interactionId, interaction, 'update');
       this.emit('discord-interaction', {
         interactionId,
         kind: 'select',
@@ -594,7 +684,7 @@ export default class DiscordBot extends BotEvents implements IBot {
       for (const [key, comp] of interaction.fields.fields.entries()) {
         if ('value' in comp) fields[key] = String((comp as any).value ?? '');
       }
-      this.scheduleAutoDefer(interactionId, interaction);
+      this.scheduleAutoDefer(interactionId, interaction, 'modal');
       this.emit('discord-modal', {
         interactionId,
         modalId: String(interaction.customId || ''),
@@ -607,27 +697,35 @@ export default class DiscordBot extends BotEvents implements IBot {
     }
   }
 
-  private scheduleAutoDefer(interactionId: string, interaction: any): void {
-    setTimeout(() => {
+  private scheduleAutoDefer(interactionId: string, interaction: any, mode: 'reply' | 'update' | 'modal' = 'update'): void {
+    const timer = setTimeout(() => {
       if (this.answeredInteractions.has(interactionId)) return;
       if (!interaction || interaction.replied || interaction.deferred) return;
-      if (typeof interaction.deferUpdate === 'function') {
+      if (mode === 'reply') {
+        if (typeof interaction.deferReply === 'function') {
+          void interaction.deferReply().catch(() => {});
+        }
+      } else if (mode === 'modal') {
+        if (interaction.isFromMessage?.() && typeof interaction.deferUpdate === 'function') {
+          void interaction.deferUpdate().catch(() => {});
+        } else if (typeof interaction.deferReply === 'function') {
+          void interaction.deferReply().catch(() => {});
+        }
+      } else if (typeof interaction.deferUpdate === 'function') {
         void interaction.deferUpdate().catch(() => {});
       }
     }, 1800);
+    (timer as any).unref?.();
   }
 
-  private async convertIncomingMessage(dMsg: DiscordJSMessage): Promise<Message> {
+  private async convertIncomingMessage(dMsg: DiscordJSMessage, depth: number = 0): Promise<Message> {
     const chat = this.toRompotChat(dMsg.channel, dMsg.guild);
     const user = this.toRompotUser(dMsg.author, dMsg.member);
     const mentions = Array.from(dMsg.mentions.users.keys()).map(String);
     const baseExtra = {
-      guildId: dMsg.guildId ? String(dMsg.guildId) : '',
-      guildName: String(dMsg.guild?.name || ''),
-      guildIcon: dMsg.guild?.iconURL() || '',
-      guildMemberCount: Number(dMsg.guild?.memberCount ?? 0),
+      ...this.buildGuildMeta(dMsg.guild, dMsg.channel),
       channelId: String(dMsg.channelId || ''),
-      channelName: String((dMsg.channel as any)?.name || ''),
+      userTag: String(dMsg.author?.tag || dMsg.author?.username || ''),
       threadId: dMsg.channel?.isThread?.() ? String(dMsg.channelId) : '',
     };
 
@@ -665,10 +763,10 @@ export default class DiscordBot extends BotEvents implements IBot {
       });
     }
 
-    if (dMsg.reference?.messageId) {
+    if (depth < 1 && dMsg.reference?.messageId) {
       try {
         const refMsg = await dMsg.fetchReference();
-        rompotMsg.mention = await this.convertIncomingMessage(refMsg);
+        rompotMsg.mention = await this.convertIncomingMessage(refMsg, depth + 1);
       } catch {}
     }
     return rompotMsg;
@@ -680,12 +778,22 @@ export default class DiscordBot extends BotEvents implements IBot {
     this.auth = auth;
     const token = typeof auth === 'string' ? auth : await auth.get('BOT_TOKEN');
     if (!token) throw new Error('Token do Discord não informado.');
-    await this.discord.login(String(token).trim());
+    if (this.clientDestroyed) {
+      this.discord = this.createClient(this.options.intents);
+    }
+    try {
+      await this.discord.login(String(token).trim());
+    } catch (err) {
+      this.clientDestroyed = true;
+      try { await this.discord.destroy(); } catch {}
+      throw err;
+    }
   }
 
   public async reconnect(_alert?: boolean): Promise<void> {
     this.status = BotStatus.Offline;
     this.emit('reconnecting', {});
+    this.clientDestroyed = true;
     try { await this.discord.destroy(); } catch {}
     this.discord = this.createClient(this.options.intents);
     await this.connect(this.auth);
@@ -693,12 +801,14 @@ export default class DiscordBot extends BotEvents implements IBot {
 
   public async stop(_reason?: any): Promise<void> {
     this.status = BotStatus.Offline;
+    this.clientDestroyed = true;
     try { await this.discord.destroy(); } catch {}
     this.emit('stop', { isLogout: false });
   }
 
   public async logout(): Promise<void> {
     this.status = BotStatus.Offline;
+    this.clientDestroyed = true;
     try { await this.discord.destroy(); } catch {}
     this.emit('stop', { isLogout: true });
   }
@@ -713,19 +823,23 @@ export default class DiscordBot extends BotEvents implements IBot {
       if (message.extra?.ephemeral) {
         payload.flags = MessageFlags.Ephemeral;
       }
-      let sent: any;
-      if (stored.replied || stored.deferred) {
-        sent = await stored.followUp({ ...payload, withResponse: true }).catch(() => stored.editReply(payload));
-      } else {
-        const res = await stored.reply({ ...payload, withResponse: true });
-        sent = res?.resource?.message ?? await stored.fetchReply().catch(() => null);
+      try {
+        let sent: any;
+        if (stored.replied || stored.deferred) {
+          sent = await stored.followUp({ ...payload, withResponse: true }).catch(() => stored.editReply(payload));
+        } else {
+          const res = await stored.reply({ ...payload, withResponse: true });
+          sent = res?.resource?.message ?? await stored.fetchReply().catch(() => null);
+        }
+        const msgId = String(sent?.id || interactionId);
+        return new Message(message.chat, payload.content || message.text || '', {
+          id: msgId,
+          fromMe: true,
+          extra: { ...message.extra, channelId: String(message.chat?.id || ''), interactionId },
+        });
+      } catch {
+        // Se a interação já expirou no Discord, faz fallback para envio normal no canal.
       }
-      const msgId = String(sent?.id || interactionId);
-      return new Message(message.chat, payload.content || message.text || '', {
-        id: msgId,
-        fromMe: true,
-        extra: { ...message.extra, channelId: String(message.chat?.id || ''), interactionId },
-      });
     }
 
     const channel = await this.fetchSendableChannel(String(message.chat?.id || ''));
@@ -1266,5 +1380,79 @@ export default class DiscordBot extends BotEvents implements IBot {
 
   public async disconnectVoiceMember(guildOrChannelId: string, userId: string): Promise<void> {
     await this.moveVoiceMember(guildOrChannelId, userId, '');
+  }
+
+  // ==================== SERVER (GUILD) MANAGEMENT ====================
+
+  public async isServerAdmin(guildOrChannelId: string, userId: string): Promise<boolean> {
+    const guild = await this.resolveGuild(guildOrChannelId);
+    if (String(guild.ownerId || '') === String(userId)) return true;
+    const member = await guild.members.fetch(String(userId)).catch(() => null);
+    if (!member) return false;
+    return Boolean(
+      member.permissions?.has(PermissionFlagsBits.Administrator)
+      || member.permissions?.has(PermissionFlagsBits.ManageGuild),
+    );
+  }
+
+  public async isServerMember(guildOrChannelId: string, userId: string): Promise<boolean> {
+    const guild = await this.resolveGuild(guildOrChannelId);
+    const member = await guild.members.fetch(String(userId)).catch(() => null);
+    return Boolean(member);
+  }
+
+  public async getServerMembers(guildOrChannelId: string): Promise<string[]> {
+    const guild = await this.resolveGuild(guildOrChannelId);
+    const members = await guild.members.fetch().catch(() => guild.members.cache);
+    return Array.from(members.keys()).map(String);
+  }
+
+  public async getServerAdmins(guildOrChannelId: string): Promise<string[]> {
+    const guild = await this.resolveGuild(guildOrChannelId);
+    const members = await guild.members.fetch().catch(() => guild.members.cache);
+    return Array.from(members.values())
+      .filter((m: any) => (
+        String(m.id) === String(guild.ownerId || '')
+        || m.permissions?.has(PermissionFlagsBits.Administrator)
+        || m.permissions?.has(PermissionFlagsBits.ManageGuild)
+      ))
+      .map((m: any) => String(m.id));
+  }
+
+  public async getServerInvite(guildOrChannelId: string): Promise<string> {
+    const id = String(guildOrChannelId || '').trim();
+    const directChannel: any = await this.discord.channels.fetch(id).catch(() => null);
+    if (directChannel?.createInvite) {
+      const invite = await directChannel.createInvite({ maxAge: 0, maxUses: 0 });
+      return invite?.url || '';
+    }
+    const guild = await this.resolveGuild(id);
+    const channels = await guild.channels.fetch().catch(() => guild.channels.cache);
+    const candidate: any = guild.systemChannel
+      || guild.rulesChannel
+      || Array.from(channels.values()).find((ch: any) => typeof ch?.createInvite === 'function');
+    if (!candidate?.createInvite) return '';
+    const invite = await candidate.createInvite({ maxAge: 0, maxUses: 0 });
+    return invite?.url || '';
+  }
+
+  public async setServerName(guildOrChannelId: string, name: string): Promise<void> {
+    const guild = await this.resolveGuild(guildOrChannelId);
+    await guild.setName(String(name).slice(0, 100));
+  }
+
+  public async setServerDescription(guildOrChannelId: string, description: string): Promise<void> {
+    const guild = await this.resolveGuild(guildOrChannelId);
+    await guild.setDescription(description ? String(description).slice(0, 120) : null);
+  }
+
+  public async setServerIcon(guildOrChannelId: string, icon: Buffer): Promise<void> {
+    const guild = await this.resolveGuild(guildOrChannelId);
+    await guild.setIcon(icon);
+  }
+
+  public async leaveServer(guildOrChannelId: string): Promise<void> {
+    const guild = await this.resolveGuild(guildOrChannelId);
+    await guild.leave();
   }
 }

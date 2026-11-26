@@ -27,8 +27,10 @@ export default class DiscordBot extends BotEvents implements IBot {
     profileUrl: string;
     private interactions;
     private answeredInteractions;
+    private clientDestroyed;
     constructor(options?: DiscordBotOptions);
     private createClient;
+    private buildGuildMeta;
     private storeInteraction;
     private toRompotChat;
     private toRompotUser;
@@ -152,4 +154,13 @@ export default class DiscordBot extends BotEvents implements IBot {
     muteVoiceMember(guildOrChannelId: string, userId: string, muted?: boolean): Promise<void>;
     deafenVoiceMember(guildOrChannelId: string, userId: string, deafened?: boolean): Promise<void>;
     disconnectVoiceMember(guildOrChannelId: string, userId: string): Promise<void>;
+    isServerAdmin(guildOrChannelId: string, userId: string): Promise<boolean>;
+    isServerMember(guildOrChannelId: string, userId: string): Promise<boolean>;
+    getServerMembers(guildOrChannelId: string): Promise<string[]>;
+    getServerAdmins(guildOrChannelId: string): Promise<string[]>;
+    getServerInvite(guildOrChannelId: string): Promise<string>;
+    setServerName(guildOrChannelId: string, name: string): Promise<void>;
+    setServerDescription(guildOrChannelId: string, description: string): Promise<void>;
+    setServerIcon(guildOrChannelId: string, icon: Buffer): Promise<void>;
+    leaveServer(guildOrChannelId: string): Promise<void>;
 }

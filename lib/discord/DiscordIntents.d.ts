@@ -1,5 +1,5 @@
 import { GatewayIntentBits } from 'discord.js';
-export type DiscordIntentKey = 'Guilds' | 'GuildMembers' | 'GuildModeration' | 'GuildEmojisAndStickers' | 'GuildIntegrations' | 'GuildWebhooks' | 'GuildInvites' | 'GuildVoiceStates' | 'GuildPresences' | 'GuildMessages' | 'GuildMessageReactions' | 'GuildMessageTyping' | 'DirectMessages' | 'DirectMessageReactions' | 'DirectMessageTyping' | 'MessageContent' | 'GuildScheduledEvents' | 'AutoModerationConfiguration' | 'AutoModerationExecution';
+export type DiscordIntentKey = 'Guilds' | 'GuildMembers' | 'GuildModeration' | 'GuildEmojisAndStickers' | 'GuildExpressions' | 'GuildIntegrations' | 'GuildWebhooks' | 'GuildInvites' | 'GuildVoiceStates' | 'GuildPresences' | 'GuildMessages' | 'GuildMessageReactions' | 'GuildMessageTyping' | 'DirectMessages' | 'DirectMessageReactions' | 'DirectMessageTyping' | 'MessageContent' | 'GuildScheduledEvents' | 'AutoModerationConfiguration' | 'AutoModerationExecution' | 'GuildMessagePolls' | 'DirectMessagePolls';
 export declare const DISCORD_INTENT_MAP: Record<DiscordIntentKey, GatewayIntentBits>;
 export declare const DEFAULT_DISCORD_INTENTS: DiscordIntentKey[];
 export declare const PRIVILEGED_DISCORD_INTENTS: Set<DiscordIntentKey>;

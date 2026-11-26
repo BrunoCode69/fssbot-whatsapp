@@ -1548,6 +1548,33 @@ export default class Client<Bot extends IBot = IBot>
   public disconnectVoiceMember(guildOrChannelId: string, userId: string): Promise<void> {
     return this.callBot('disconnectVoiceMember', guildOrChannelId, userId);
   }
+  public isServerAdmin(guildOrChannelId: string, userId: string): Promise<boolean> {
+    return this.callBot('isServerAdmin', guildOrChannelId, userId);
+  }
+  public isServerMember(guildOrChannelId: string, userId: string): Promise<boolean> {
+    return this.callBot('isServerMember', guildOrChannelId, userId);
+  }
+  public getServerMembers(guildOrChannelId: string): Promise<string[]> {
+    return this.callBot('getServerMembers', guildOrChannelId);
+  }
+  public getServerAdmins(guildOrChannelId: string): Promise<string[]> {
+    return this.callBot('getServerAdmins', guildOrChannelId);
+  }
+  public getServerInvite(guildOrChannelId: string): Promise<string> {
+    return this.callBot('getServerInvite', guildOrChannelId);
+  }
+  public setServerName(guildOrChannelId: string, name: string): Promise<void> {
+    return this.callBot('setServerName', guildOrChannelId, name);
+  }
+  public setServerDescription(guildOrChannelId: string, description: string): Promise<void> {
+    return this.callBot('setServerDescription', guildOrChannelId, description);
+  }
+  public setServerIcon(guildOrChannelId: string, icon: Buffer): Promise<void> {
+    return this.callBot('setServerIcon', guildOrChannelId, icon);
+  }
+  public leaveServer(guildOrChannelId: string): Promise<void> {
+    return this.callBot('leaveServer', guildOrChannelId);
+  }
 
   public static getClients(): Record<string, Client<IBot>> {
     if (

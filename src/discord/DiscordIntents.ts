@@ -5,6 +5,7 @@ export type DiscordIntentKey =
   | 'GuildMembers'
   | 'GuildModeration'
   | 'GuildEmojisAndStickers'
+  | 'GuildExpressions'
   | 'GuildIntegrations'
   | 'GuildWebhooks'
   | 'GuildInvites'
@@ -19,13 +20,16 @@ export type DiscordIntentKey =
   | 'MessageContent'
   | 'GuildScheduledEvents'
   | 'AutoModerationConfiguration'
-  | 'AutoModerationExecution';
+  | 'AutoModerationExecution'
+  | 'GuildMessagePolls'
+  | 'DirectMessagePolls';
 
 export const DISCORD_INTENT_MAP: Record<DiscordIntentKey, GatewayIntentBits> = {
   Guilds: GatewayIntentBits.Guilds,
   GuildMembers: GatewayIntentBits.GuildMembers,
   GuildModeration: GatewayIntentBits.GuildModeration,
   GuildEmojisAndStickers: GatewayIntentBits.GuildEmojisAndStickers,
+  GuildExpressions: (GatewayIntentBits as any).GuildExpressions ?? GatewayIntentBits.GuildEmojisAndStickers,
   GuildIntegrations: GatewayIntentBits.GuildIntegrations,
   GuildWebhooks: GatewayIntentBits.GuildWebhooks,
   GuildInvites: GatewayIntentBits.GuildInvites,
@@ -41,6 +45,8 @@ export const DISCORD_INTENT_MAP: Record<DiscordIntentKey, GatewayIntentBits> = {
   GuildScheduledEvents: GatewayIntentBits.GuildScheduledEvents,
   AutoModerationConfiguration: GatewayIntentBits.AutoModerationConfiguration,
   AutoModerationExecution: GatewayIntentBits.AutoModerationExecution,
+  GuildMessagePolls: GatewayIntentBits.GuildMessagePolls,
+  DirectMessagePolls: GatewayIntentBits.DirectMessagePolls,
 };
 
 export const DEFAULT_DISCORD_INTENTS: DiscordIntentKey[] = [
@@ -64,13 +70,13 @@ export const PRIVILEGED_DISCORD_INTENTS = new Set<DiscordIntentKey>([
  */
 export function resolveDiscordIntents(input?: string[] | number | null): GatewayIntentBits[] {
   if (typeof input === 'number' && Number.isFinite(input) && input > 0) {
-    const resolved: GatewayIntentBits[] = [];
+    const resolved = new Set<GatewayIntentBits>();
     for (const bit of Object.values(DISCORD_INTENT_MAP)) {
       if ((input & Number(bit)) === Number(bit)) {
-        resolved.push(bit);
+        resolved.add(bit);
       }
     }
-    return resolved.length > 0 ? resolved : DEFAULT_DISCORD_INTENTS.map((k) => DISCORD_INTENT_MAP[k]);
+    return resolved.size > 0 ? Array.from(resolved) : DEFAULT_DISCORD_INTENTS.map((k) => DISCORD_INTENT_MAP[k]);
   }
 
   if (Array.isArray(input) && input.length > 0) {
@@ -87,4 +93,3 @@ export function resolveDiscordIntents(input?: string[] | number | null): Gateway
 
   return DEFAULT_DISCORD_INTENTS.map((key) => DISCORD_INTENT_MAP[key]);
 }
-

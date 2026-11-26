@@ -238,8 +238,17 @@ export type DiscordMessageDeleteEvent = {
 export type DiscordRoleUpdateEvent = {
     action: 'create' | 'update' | 'delete';
     guildId: string;
+    guildName?: string;
+    guildIcon?: string;
+    guildMemberCount?: number;
+    guildOwnerId?: string;
     roleId: string;
     roleName: string;
     color: string;
+    role: {
+        id: string;
+        name: string;
+        color: string;
+    };
     chat: Chat;
 };

@@ -217,6 +217,15 @@ export default class Client<Bot extends IBot = IBot> extends ClientEvents {
     muteVoiceMember(guildOrChannelId: string, userId: string, muted?: boolean): Promise<void>;
     deafenVoiceMember(guildOrChannelId: string, userId: string, deafened?: boolean): Promise<void>;
     disconnectVoiceMember(guildOrChannelId: string, userId: string): Promise<void>;
+    isServerAdmin(guildOrChannelId: string, userId: string): Promise<boolean>;
+    isServerMember(guildOrChannelId: string, userId: string): Promise<boolean>;
+    getServerMembers(guildOrChannelId: string): Promise<string[]>;
+    getServerAdmins(guildOrChannelId: string): Promise<string[]>;
+    getServerInvite(guildOrChannelId: string): Promise<string>;
+    setServerName(guildOrChannelId: string, name: string): Promise<void>;
+    setServerDescription(guildOrChannelId: string, description: string): Promise<void>;
+    setServerIcon(guildOrChannelId: string, icon: Buffer): Promise<void>;
+    leaveServer(guildOrChannelId: string): Promise<void>;
     static getClients(): Record<string, Client<IBot>>;
     static saveClients(clients: Record<string, Client<IBot>>): void;
     static getClient(id: string): Client<IBot>;

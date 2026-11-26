@@ -15,11 +15,12 @@ import {
 
 describe('DiscordIntents e buildDiscordPayload', () => {
   test('resolveDiscordIntents resolve lista de nomes e bitmask numérico com fallback padrão', () => {
-    const fromNames = resolveDiscordIntents(['Guilds', 'GuildMessages', 'MessageContent']);
+    const fromNames = resolveDiscordIntents(['Guilds', 'GuildMessages', 'MessageContent', 'GuildExpressions']);
     expect(fromNames).toEqual([
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.MessageContent,
+      (GatewayIntentBits as any).GuildExpressions ?? GatewayIntentBits.GuildEmojisAndStickers,
     ]);
 
     const mask = Number(GatewayIntentBits.Guilds) | Number(GatewayIntentBits.DirectMessages);
