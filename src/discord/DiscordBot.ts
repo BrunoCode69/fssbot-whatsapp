@@ -383,6 +383,13 @@ export default class DiscordBot extends BotEvents implements IBot {
       chat.name = member.guild?.name || '';
       const user = this.toRompotUser(member.user, member);
       this.emit('user', {
+        action: 'join' as UserAction,
+        event: 'add' as UserEvent,
+        chat,
+        user,
+        fromUser: user,
+      });
+      this.emit('user', {
         action: 'add' as UserAction,
         event: 'add' as UserEvent,
         chat,
@@ -395,6 +402,13 @@ export default class DiscordBot extends BotEvents implements IBot {
       const chat = new Chat(String(member.guild?.id || ''), ChatType.Group);
       chat.name = member.guild?.name || '';
       const user = this.toRompotUser(member.user, member);
+      this.emit('user', {
+        action: 'leave' as UserAction,
+        event: 'remove' as UserEvent,
+        chat,
+        user,
+        fromUser: user,
+      });
       this.emit('user', {
         action: 'remove' as UserAction,
         event: 'remove' as UserEvent,
