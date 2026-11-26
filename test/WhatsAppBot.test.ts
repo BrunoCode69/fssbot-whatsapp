@@ -395,5 +395,100 @@ describe('WhatsApp quoted media & mention conversion', () => {
     expect(FileMessage.isValid(converted.mention)).toBe(true);
     expect((converted.mention as FileMessage).name).toBe('servidor.ehi');
   });
+
+  test('merges missing fileName, directPath, and mediaKey from cached message when quotedMessage is stripped', async () => {
+    const { resolveMediaPayload } = require('../node_modules/zapo-js/dist/message/encode/media-payload.js');
+    const mediaKey = new Uint8Array(32).fill(11);
+    const cachedOriginal = {
+      key: { remoteJid: '5511999999999@s.whatsapp.net', id: 'orig-doc-1', fromMe: false },
+      message: {
+        documentWithCaptionMessage: {
+          message: {
+            documentMessage: {
+              fileName: 'config_premium.ehi',
+              mimetype: 'application/octet-stream',
+              directPath: '/v/t62.7119-24/from-cache',
+              mediaKey,
+              fileLength: 512,
+            },
+          },
+        },
+      },
+    };
+    const fakeBot = {
+      id: '5511000000000@s.whatsapp.net',
+      lid: '100000000@lid',
+      resolveId: async (jid: string) => jid,
+      canonicalId: (jid: string) => jid,
+      extractAndMapLID: () => ({ id: '' }),
+      getCachedWAMessage: (id?: string) => (id === 'orig-doc-1' ? cachedOriginal : undefined),
+    } as any;
+
+    const incoming = {
+      key: { remoteJid: '5511999999999@s.whatsapp.net', id: 'cmd-partial-quote', fromMe: false },
+      message: {
+        extendedTextMessage: {
+          text: '/decrypt',
+          contextInfo: {
+            stanzaId: 'orig-doc-1',
+            participant: '100000000@lid',
+            quotedMessage: {
+              documentMessage: {
+                mimetype: 'application/octet-stream',
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const converted = await new ConvertWAMessage(fakeBot, incoming).get();
+    expect(FileMessage.isValid(converted.mention)).toBe(true);
+    const quotedDoc = converted.mention as FileMessage;
+    expect(quotedDoc.name).toBe('config_premium.ehi');
+    expect(quotedDoc.fromMe).toBe(true);
+    const payload = resolveMediaPayload(resolveDownloadMediaInput((quotedDoc.file as any).stream));
+    expect(payload).not.toBeNull();
+    expect(payload.directPath).toBe('/v/t62.7119-24/from-cache');
+  });
+
+  test('recovers quoted FileMessage via stanzaId cache even when quotedMessage is omitted', async () => {
+    const mediaKey = new Uint8Array(32).fill(5);
+    const cachedOriginal = {
+      key: { remoteJid: '5511999999999@s.whatsapp.net', id: 'stanza-only-1', fromMe: true },
+      message: {
+        documentMessage: {
+          fileName: 'rota.ehi',
+          mimetype: 'text/plain',
+          directPath: '/v/t62.7119-24/stanza',
+          mediaKey,
+        },
+      },
+    };
+    const fakeBot = {
+      id: '5511000000000@s.whatsapp.net',
+      resolveId: async (jid: string) => jid,
+      canonicalId: (jid: string) => jid,
+      extractAndMapLID: () => ({ id: '' }),
+      getCachedWAMessage: (id?: string) => (id === 'stanza-only-1' ? cachedOriginal : undefined),
+    } as any;
+
+    const incoming = {
+      key: { remoteJid: '5511999999999@s.whatsapp.net', id: 'cmd-stanza-only', fromMe: false },
+      message: {
+        extendedTextMessage: {
+          text: '/decrypt',
+          contextInfo: {
+            stanzaId: 'stanza-only-1',
+          },
+        },
+      },
+    };
+
+    const converted = await new ConvertWAMessage(fakeBot, incoming).get();
+    expect(FileMessage.isValid(converted.mention)).toBe(true);
+    expect((converted.mention as FileMessage).name).toBe('rota.ehi');
+    expect((converted.mention as FileMessage).fromMe).toBe(true);
+  });
 });
 

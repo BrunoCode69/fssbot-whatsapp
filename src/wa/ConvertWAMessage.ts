@@ -43,6 +43,87 @@ const IGNORED_MESSAGE_CONTENT_KEYS = new Set([
   '$$unknownFieldCount',
 ]);
 
+function firstActiveMessageKey(content: any): string | undefined {
+  if (!content || typeof content !== 'object') return undefined;
+  return Object.keys(content).find((key) => {
+    if (IGNORED_MESSAGE_CONTENT_KEYS.has(key)) return false;
+    const val = content[key];
+    return val !== null && val !== undefined;
+  });
+}
+
+function unwrapContainerLayers(messageContent: any): { content: any; viewOnce: boolean } {
+  let current = messageContent;
+  let viewOnce = false;
+
+  for (let depth = 0; depth < 8 && current && typeof current === 'object'; depth++) {
+    const once =
+      current.viewOnceMessage?.message ||
+      current.viewOnceMessageV2?.message ||
+      current.viewOnceMessageV2Extension?.message;
+
+    if (once) {
+      viewOnce = true;
+      current = once;
+      continue;
+    }
+
+    const inner =
+      current.ephemeralMessage?.message ||
+      current.documentWithCaptionMessage?.message ||
+      current.groupMentionedMessage?.message ||
+      current.botInvokeMessage?.message ||
+      current.deviceSentMessage?.message ||
+      current.associatedChildMessage?.message ||
+      current.groupStatusMessage?.message ||
+      current.groupStatusMessageV2?.message ||
+      current.botForwardedMessage?.message;
+
+    if (!inner) break;
+
+    current = inner;
+  }
+
+  return { content: current, viewOnce };
+}
+
+/**
+ * Mescla o payload parcial de `contextInfo.quotedMessage` com a mensagem completa em cache,
+ * recuperando metadados (ex.: `fileName`, `title`, `url`, `mediaKey`) que clientes WhatsApp
+ * frequentemente omitem ao citar documentos e mídias.
+ */
+function mergeQuotedMessagePayload(quotedMessage: any, cachedMessage: any): any {
+  const hasQuoted = quotedMessage && typeof quotedMessage === 'object' && Object.keys(quotedMessage).length > 0;
+  if (!hasQuoted) return cachedMessage;
+  if (!cachedMessage || typeof cachedMessage !== 'object') return quotedMessage;
+
+  const quotedLayer = unwrapContainerLayers(quotedMessage);
+  const cachedLayer = unwrapContainerLayers(cachedMessage);
+  const quotedKey = firstActiveMessageKey(quotedLayer.content);
+  const cachedKey = firstActiveMessageKey(cachedLayer.content);
+
+  if (!quotedKey) return cachedMessage;
+  if (!cachedKey || quotedKey !== cachedKey) return quotedMessage;
+
+  const quotedNode = quotedLayer.content[quotedKey];
+  const cachedNode = cachedLayer.content[cachedKey];
+  if (!quotedNode || typeof quotedNode !== 'object' || !cachedNode || typeof cachedNode !== 'object') {
+    return quotedMessage;
+  }
+
+  const mergedNode: Record<string, any> = { ...cachedNode };
+  for (const [k, v] of Object.entries(quotedNode)) {
+    if (v !== undefined && v !== null && v !== '') {
+      mergedNode[k] = v;
+    }
+  }
+
+  const merged = { [quotedKey]: mergedNode };
+  return quotedLayer.viewOnce || cachedLayer.viewOnce
+    ? { viewOnceMessageV2: { message: merged } }
+    : merged;
+}
+
 export default class ConvertWAMessage {
   public type?: any;
   public waMessage: any = { key: {} };
@@ -275,37 +356,9 @@ export default class ConvertWAMessage {
    * Marca `isViewOnce` quando passa por visualização única.
    */
   public unwrapContainers(messageContent: any): any {
-    let current = messageContent;
-
-    for (let depth = 0; depth < 8 && current && typeof current === 'object'; depth++) {
-      const viewOnce =
-        current.viewOnceMessage?.message ||
-        current.viewOnceMessageV2?.message ||
-        current.viewOnceMessageV2Extension?.message;
-
-      if (viewOnce) {
-        this.message.isViewOnce = true;
-        current = viewOnce;
-        continue;
-      }
-
-      const inner =
-        current.ephemeralMessage?.message ||
-        current.documentWithCaptionMessage?.message ||
-        current.groupMentionedMessage?.message ||
-        current.botInvokeMessage?.message ||
-        current.deviceSentMessage?.message ||
-        current.associatedChildMessage?.message ||
-        current.groupStatusMessage?.message ||
-        current.groupStatusMessageV2?.message ||
-        current.botForwardedMessage?.message;
-
-      if (!inner) break;
-
-      current = inner;
-    }
-
-    return current;
+    const { content, viewOnce } = unwrapContainerLayers(messageContent);
+    if (viewOnce) this.message.isViewOnce = true;
+    return content;
   }
 
   public async convertContentMessage(messageContent: any): Promise<void> {
@@ -434,7 +487,7 @@ export default class ConvertWAMessage {
       }
     }
 
-    if (context.quotedMessage) {
+    if (context.quotedMessage || context.stanzaId) {
       const cachedQuoted = context.stanzaId ? this.bot?.getCachedWAMessage?.(context.stanzaId) : undefined;
       const remoteJid = context.remoteJid || cachedQuoted?.key?.remoteJid || this.waMessage.key?.remoteJid || '';
       const resolvedParticipant = context.participant
@@ -444,12 +497,9 @@ export default class ConvertWAMessage {
         : '';
       const quotedFromMe =
         !!cachedQuoted?.key?.fromMe ||
-        (!!resolvedParticipant && resolvedParticipant === this.bot?.id);
+        (!!resolvedParticipant && (resolvedParticipant === this.bot?.id || (!!this.bot?.lid && resolvedParticipant === this.bot.lid)));
 
-      const quotedPayload =
-        Object.keys(context.quotedMessage).length > 0
-          ? context.quotedMessage
-          : cachedQuoted?.message;
+      const quotedPayload = mergeQuotedMessagePayload(context.quotedMessage, cachedQuoted?.message);
 
       if (quotedPayload) {
         const message = {
