@@ -2,10 +2,16 @@ import Message from '../messages/Message';
 /**
  * Mensagem a ser tratada
  */
-export declare type MessageHandlerConfig = {
+export type MessageHandlerConfig = {
     stopRead: boolean;
     patterns: Array<(message: Message) => boolean>;
     resolve(message: Message): void;
+    /**
+     * Cancela a espera: ela sai da fila e a promessa de `addMessage` rejeita com o motivo do sinal.
+     * Sem isso, uma espera abandonada (timeout de quem chamou) ficava na fila e engolia a próxima
+     * mensagem do chat.
+     */
+    signal?: AbortSignal;
 };
 /**
  * Representa um objeto que lida com mensagens e seus tratamentos personalizados.
@@ -27,6 +33,8 @@ export default class MessageHandler {
      * @returns Uma promessa que resolve com a mensagem.
      */
     addMessage(chatId: string, config: Partial<MessageHandlerConfig>): Promise<Message>;
+    /** Tira uma espera da fila do chat (e o chat do registro, se ficar vazio). */
+    removeMessage(chatId: string, entry: MessageHandlerConfig): void;
     /**
      * Resolve uma mensagem e seus tratamentos personalizados associados a um chat ID.
      * @param message - A mensagem a ser resolvida.

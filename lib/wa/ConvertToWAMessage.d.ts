@@ -1,4 +1,3 @@
-import { MiscMessageGenerationOptions, proto } from 'baileys';
 import Message, { MessageStatus } from '../messages/Message';
 import ListMessage from '../messages/ListMessage';
 import LocationMessage from '../messages/LocationMessage';
@@ -15,7 +14,7 @@ export default class ConvertToWAMessage {
     isMention: boolean;
     chatId: string;
     waMessage: any;
-    options: MiscMessageGenerationOptions;
+    options: any;
     isRelay: boolean;
     constructor(bot: WhatsAppBot, message: Message, isMention?: boolean);
     /**
@@ -23,50 +22,34 @@ export default class ConvertToWAMessage {
      */
     private resolveJid;
     /**
-     * * Refatora a mensagem
-     * @param message
+     * * Refatora a mensagem para o formato ZapoJS
      */
     refactory(message?: Message): Promise<this>;
     /**
-     * Monta a mensagem citada. Usa a mensagem original do cache quando existe
-     * (conteúdo e chave exatos); senão gera uma cópia a partir dos dados do Rompot.
+     * Monta a mensagem citada (quote) para o envio.
      */
-    createQuoted(mention: Message): Promise<import("baileys").WAMessage>;
+    createQuoted(mention: Message): Promise<any>;
     /**
-     * * Refatora outras informações da mensagem
-     * @param message
-     * @returns
+     * Refatora texto, menções e campos base da mensagem
      */
     refactoryMessage(message: Message): Promise<any>;
     /**
-     * * Refatora uma mensagem de midia
-     * @param message
+     * Refatora mensagens de mídia (imagem, vídeo, áudio, documento, figurinha)
      */
+    /**
+     * Conteúdo da mídia para o Zapo: caminho de arquivo local é repassado como string (o Zapo
+     * lê em stream, sem carregar tudo em memória); os demais casos viram Buffer.
+     */
+    getMediaInput(message: MediaMessage): Promise<Buffer | string>;
+    /** Metadados opcionais (só quando conhecidos) para o envio. */
+    static getMediaFields(message: MediaMessage, duration?: number): any;
     refactoryMediaMessage(message: MediaMessage): Promise<void>;
-    refatoryStickerMessage(message: StickerMessage): Promise<void>;
+    refactoryStickerMessage(message: StickerMessage): Promise<void>;
     refactoryLocationMessage(message: LocationMessage): void;
     refactoryContactMessage(message: ContactMessage): void;
-    /**
-     * * Refatora uma mensagem de reação
-     * @param message
-     */
     refactoryReactionMessage(message: ReactionMessage): Promise<void>;
-    /**
-     * * Refatora uma mensagem de enquete
-     * @param message
-     */
     refactoryPollMessage(message: PollMessage): void;
-    /**
-     * * Refatora uma mensagem de botão com formato simples
-     * Converte para formato compatível com baileys
-     * @param message
-     */
     refactoryButtonMessage(message: ButtonMessage): void;
-    /**
-     * * Refatora uma mensagem de lista
-      * Converte para o formato interativo single-select do helper WhatsApp
-     * @param message
-     */
     refactoryListMessage(message: ListMessage): Promise<void>;
-    static convertToWaMessageStatus(status: MessageStatus): proto.WebMessageInfo.Status;
+    static convertToWaMessageStatus(status: MessageStatus): any;
 }

@@ -1,9 +1,8 @@
-/// <reference types="node" />
 import { Server } from 'http';
 import { Logger } from 'pino';
 import IBot from './IBot';
 import { ServerRequest } from '../utils/server';
-export declare type BotServerOptions = {
+export type BotServerOptions = {
     serverId: string;
     server: Server;
     port: number;
@@ -13,7 +12,7 @@ export declare type BotServerOptions = {
     logger: Logger;
     version: 'apiV1';
 };
-export declare type BotWebhook = {
+export type BotWebhook = {
     id: string;
     url: string;
     ping: number;
@@ -26,7 +25,7 @@ export interface BotServerBase {
     registerWebhook(webhook: BotWebhook): void;
     removeWebhook(id: string): boolean;
 }
-export declare type BotServer<Bot extends IBot = IBot> = Bot & BotServerBase & {
+export type BotServer<Bot extends IBot = IBot> = Bot & BotServerBase & {
     configEvents(): void;
     configRoutes(): Server;
 };

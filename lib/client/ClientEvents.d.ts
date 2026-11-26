@@ -1,4 +1,3 @@
-/// <reference types="node" />
 import type UserEvent from '../modules/user/UserEvent';
 import type UserAction from '../modules/user/UserAction';
 import type ChatAction from '../modules/chat/ChatAction';
@@ -12,7 +11,7 @@ import type { BlocklistEvent, GroupJoinRequestEvent, GroupUpdateEvent, IdMapping
 /**
  * Mapeia os eventos que podem ser emitidos pelo cliente.
  */
-export declare type ClientEventsMap = {
+export type ClientEventsMap = {
     /**
      * Evento de conexão alterada.
      */
@@ -51,6 +50,11 @@ export declare type ClientEventsMap = {
     stop: {
         /** O cliente se desconectou */
         isLogout: boolean;
+        /**
+         * Por que parou, quando não foi logout. `reconnect_failed`: as tentativas de reconexão
+         * (`maxReconnectTimes`) acabaram e o cliente não tenta mais sozinho.
+         */
+        reason?: 'reconnect_failed';
     };
     /**
      * Evento de conexão fechada.

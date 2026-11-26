@@ -9,7 +9,9 @@ export declare enum ButtonType {
     /** Botão que abre uma URL */
     Url = "url",
     /** Botão para fazer uma chamada */
-    Call = "call"
+    Call = "call",
+    /** Botão para copiar código para a área de transferência (ex.: PIX) */
+    Copy = "copy"
 }
 /**
  * Interface para um botão
@@ -58,6 +60,12 @@ export default class ButtonMessage extends Message {
      * @param phone - Número de telefone
      */
     addCall(text: string, phone: string | number): this;
+    /**
+     * Adiciona um botão para copiar código para a área de transferência
+     * @param text - Texto do botão
+     * @param copyCode - Código a ser copiado (ex: código PIX ou cupom)
+     */
+    addCopy(text: string, copyCode: string): this;
     /**
      * Remove um botão
      * @param button - Botão a remover

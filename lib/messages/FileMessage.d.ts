@@ -1,4 +1,3 @@
-/// <reference types="node" />
 import MediaMessage, { Media } from "./MediaMessage";
 import { MessageType } from "./Message";
 import Chat from "../modules/chat/Chat";

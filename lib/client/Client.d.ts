@@ -1,4 +1,3 @@
-/// <reference types="node" />
 import ConnectionConfig from '../configs/ConnectionConfig';
 import Message from '../messages/Message';
 import MediaMessage from '../messages/MediaMessage';
@@ -8,6 +7,7 @@ import User from '../modules/user/User';
 import ClientEvents, { ClientEventsMap } from './ClientEvents';
 import IAuth from './IAuth';
 import IBot from '../bot/IBot';
+import { type MediaDownloadOptions } from '../utils/MediaUtils';
 import MessageHandler, { type MessageHandlerConfig } from '../utils/MessageHandler';
 import Call from '../models/Call';
 export default class Client<Bot extends IBot = IBot> extends ClientEvents {
@@ -19,6 +19,11 @@ export default class Client<Bot extends IBot = IBot> extends ClientEvents {
     id: string;
     constructor(bot: Bot, config?: Partial<ConnectionConfig>);
     configEvents(): void;
+    /**
+     * Espera antes da reconexão número `attempt` (0 = a primeira): dobra a cada tentativa até
+     * `maxReconnectTimeout`, com até 20% de variação para vários bots não voltarem ao mesmo tempo.
+     */
+    static reconnectDelay(attempt: number, config: Pick<ConnectionConfig, 'reconnectTimeout' | 'maxReconnectTimeout'>): number;
     connect(auth: IAuth | string): Promise<void>;
     reconnect(alert?: boolean): Promise<void>;
     stop(reason?: any): Promise<void>;
@@ -35,7 +40,8 @@ export default class Client<Bot extends IBot = IBot> extends ClientEvents {
     send(message: Message): Promise<Message>;
     sendMessage(chat: Chat | string, message: string | Message, mention?: Message): Promise<Message>;
     awaitMessage(chat: Chat | string, config?: Partial<MessageHandlerConfig>): Promise<Message>;
-    downloadStreamMessage(message: MediaMessage): Promise<Buffer>;
+    downloadStreamMessage(message: MediaMessage, options?: MediaDownloadOptions): Promise<Buffer>;
+    downloadMediaToFile(message: MediaMessage, filePath: string, options?: MediaDownloadOptions): Promise<void>;
     getBotName(): Promise<string>;
     setBotName(name: string): any;
     getBotDescription(): any;

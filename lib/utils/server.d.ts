@@ -1,4 +1,3 @@
-/// <reference types="express-serve-static-core" />
 import { Response } from 'express';
 import { BotServer, BotServerOptions } from '../bot/BotServer';
 export declare namespace ServerRequest {

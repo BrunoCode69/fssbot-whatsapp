@@ -9,5 +9,7 @@ export * from "./LIDMapper";
 export * from "./WAMessage";
 export * from "./WAModule";
 export * from "./WAStatus";
-export type { WhatsAppBotConfig, WAIdentity, WAJoinRequest, WAPinDuration } from "./WhatsAppBot";
+export type { WhatsAppBotConfig, WAIdentity, WAJoinRequest, WAPinDuration, WALogLevel } from "./WhatsAppBot";
+export { createDefaultLogger } from "./WhatsAppBot";
+export { createBoundedCache, safeCacheSet } from "./BoundedCache";
 export { ConfigWAEvents, ConvertToWAMessage, ConvertWAMessage, makeInMemoryStore, WhatsAppBot };

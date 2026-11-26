@@ -1,6 +1,6 @@
-/// <reference types="node" />
 import ReactionMessage from "../messages/ReactionMessage";
 import { Media } from "../messages/MediaMessage";
+import type { MediaDownloadOptions } from "../utils/MediaUtils";
 import ChatStatus from "../modules/chat/ChatStatus";
 import Message from "../messages/Message";
 import { BotStatus } from "./BotStatus";
@@ -68,9 +68,17 @@ export default interface IBot extends BotEvents {
     deleteMessage(message: Message): Promise<void>;
     /** Retorna a stream da mídia
      * @param message Mídia que será baixada
+     * @param options Limite de bytes, cancelamento e tempo máximo (opcional)
      * @returns Stream da mídia
      */
-    downloadStreamMessage(media: Media): Promise<Buffer>;
+    downloadStreamMessage(media: Media, options?: MediaDownloadOptions): Promise<Buffer>;
+    /** Baixa a mídia direto para um arquivo, em stream (opcional na implementação do bot).
+     * Em caso de falha, o arquivo parcial é apagado.
+     * @param media Mídia que será baixada
+     * @param filePath Caminho do arquivo de destino
+     * @param options Limite de bytes, cancelamento e tempo máximo (opcional)
+     */
+    downloadMediaToFile?(media: Media, filePath: string, options?: MediaDownloadOptions): Promise<void>;
     /** @returns Retorna o nome do bot */
     getBotName(): Promise<string>;
     /** Define o nome do bot

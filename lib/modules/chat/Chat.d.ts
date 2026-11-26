@@ -1,4 +1,3 @@
-/// <reference types="node" />
 import User from '../../modules/user/User';
 import Message from '../../messages/Message';
 import ChatType from './ChatType';

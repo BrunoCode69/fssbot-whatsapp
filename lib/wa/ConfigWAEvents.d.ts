@@ -1,28 +1,33 @@
-import { MessageUpsertType, proto } from 'baileys';
+import type { WaClient } from 'zapo-js';
 import WhatsAppBot from './WhatsAppBot';
 export default class ConfigWAEvents {
     wa: WhatsAppBot;
     constructor(wa: WhatsAppBot);
-    configureAll(): void;
-    /** Cria um User com os IDs conhecidos (sem acessar o disco). */
+    configureAll(client?: WaClient): void;
+    /** Momento do stanza (atributo `t`, em segundos) em milissegundos. */
+    private stanzaTimestamp;
+    private toChat;
+    /**
+     * Descarta mensagens de `status@broadcast` antes da descriptografia (o Zapo ainda envia o ack).
+     * O filtro em `configMessages` continua como segurança caso o descarte não esteja disponível.
+     */
+    configIgnoreStatus(zapo: WaClient): void;
     private toUser;
-    /** Cria um Chat de grupo com o nome em cache, sem acessar a rede. */
     private toGroupChat;
-    configLidMapping(): void;
-    configGroupParticipants(): void;
-    configGroupJoinRequest(): void;
-    readMessages(messages: proto.IWebMessageInfo[], type?: MessageUpsertType): Promise<void>;
-    configMessagesUpsert(): void;
-    configMessagesUpdate(): void;
-    configConnectionUpdate(): void;
-    configHistorySet(): void;
-    private handleContacts;
-    configContactsUpdate(): void;
-    configContactsUpsert(): void;
-    configGroupsUpsert(): void;
-    configGroupsUpdate(): void;
-    configChatsDelete(): void;
-    configPresence(): void;
-    configBlocklist(): void;
-    configCall(): void;
+    configAuth(zapo: WaClient): void;
+    configConnection(zapo: WaClient): void;
+    configMessages(zapo: WaClient): void;
+    configGroup(zapo: WaClient): void;
+    configPresence(zapo: WaClient): void;
+    configCall(zapo: WaClient): void;
+    configBlocklist(zapo: WaClient): void;
+    /** Confirmações de entrega/leitura → evento `receipt`. */
+    configReceipts(zapo: WaClient): void;
+    /** Digitando/gravando → evento `chatstate` (requer `subscribePresence`). */
+    configChatstate(zapo: WaClient): void;
+    /** Mensagens sem conteúdo, mensagens de protocolo e cache das mensagens enviadas. */
+    configMessageExtras(zapo: WaClient): void;
+    /** Foto de perfil de contato/grupo alterada → evento `picture`. */
+    configPicture(zapo: WaClient): void;
+    configExtraEvents(zapo: WaClient): void;
 }

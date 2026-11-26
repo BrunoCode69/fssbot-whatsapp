@@ -1,4 +1,3 @@
-/// <reference types="node" />
 import IAuth from "../client/IAuth";
 export default class TelegramAuth implements IAuth {
     #private;

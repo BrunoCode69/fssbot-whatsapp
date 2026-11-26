@@ -1,4 +1,3 @@
-/// <reference types="node" />
 import TelegramBotAPI from 'node-telegram-bot-api';
 import IAuth from '../client/IAuth';
 import ChatStatus from '../modules/chat/ChatStatus';
@@ -11,6 +10,7 @@ import ReactionMessage from '../messages/ReactionMessage';
 import { Media } from '../messages/MediaMessage';
 import Message from '../messages/Message';
 import TelegramEvents from './TelegramEvents';
+import { type MediaDownloadOptions } from '../utils/MediaUtils';
 import Call from '../models/Call';
 export default class TelegramBot extends BotEvents implements IBot {
     auth: IAuth;
@@ -33,8 +33,23 @@ export default class TelegramBot extends BotEvents implements IBot {
     removeReaction(message: ReactionMessage): Promise<void>;
     readMessage(message: Message): Promise<void>;
     removeMessage(message: Message): Promise<void>;
+    pinMessage(message: Message, _duration?: number): Promise<void>;
+    unpinMessage(message: Message): Promise<void>;
+    forwardMessage(chat: Chat, message: Message): Promise<Message>;
     deleteMessage(message: Message): Promise<void>;
-    downloadStreamMessage(media: Media): Promise<Buffer>;
+    /**
+     * Baixa a mídia para a memória.
+     * @param options Opcional: `maxBytes` (sem valor = sem limite), `signal` e `timeoutMs`.
+     */
+    downloadStreamMessage(media: Media, options?: MediaDownloadOptions): Promise<Buffer>;
+    /**
+     * Baixa a mídia direto para `filePath`, em stream (sem carregar tudo em memória).
+     * Aplica `maxBytes` pelo tamanho declarado, pelo Content-Length e pelos bytes contados.
+     * Em caso de falha o arquivo parcial é apagado.
+     */
+    downloadMediaToFile(media: Media, filePath: string, options?: MediaDownloadOptions): Promise<void>;
+    /** Falha cedo quando o Telegram declara (`file_size`) um tamanho acima de `maxBytes`. */
+    private static assertDeclaredMediaSize;
     getBotName(): Promise<string>;
     setBotName(name: string): Promise<void>;
     getBotDescription(): Promise<string>;

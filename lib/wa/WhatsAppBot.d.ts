@@ -1,6 +1,4 @@
-/// <reference types="node" />
-/// <reference types="node" />
-import makeWASocket, { MediaDownloadOptions, AuthenticationCreds, WAConnectionState, DisconnectReason, ConnectionState, GroupMetadata, SocketConfig, WAMessage, WAVersion, Contact, proto, Chat as BaileysChat } from 'baileys';
+import { proto, type WaClient } from 'zapo-js';
 import NodeCache from 'node-cache';
 import { PollMessage, PollUpdateMessage, ReactionMessage } from '../messages';
 import Message from '../messages/Message';
@@ -17,7 +15,98 @@ import User from '../modules/user/User';
 import Chat from '../modules/chat/Chat';
 import IBot from '../bot/IBot';
 import Call from '../models/Call';
-export declare type WhatsAppBotConfig = Partial<SocketConfig> & {
+export type WALogLevel = 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace' | 'silent';
+export declare function createDefaultLogger(level?: WALogLevel): any;
+export type WAMessage = proto.IWebMessageInfo;
+export type WAVersion = [number, number, number] | [number, number, number, number] | any[];
+export interface SocketConfig {
+    logger?: any;
+    version?: WAVersion;
+    printQRInTerminal?: boolean;
+    qrTimeout?: number;
+    defaultQueryTimeoutMs?: number;
+    retryRequestDelayMs?: number;
+    maxMsgRetryCount?: number;
+    keepAliveIntervalMs?: number;
+    browser?: [string, string, string];
+    syncFullHistory?: boolean;
+    shouldIgnoreJid?: (jid: string) => boolean;
+    patchMessageBeforeSending?: (msg: any) => Promise<any> | any;
+    getMessage?: (key: any) => Promise<any>;
+    ignoreStatusBroadcast?: boolean;
+    [key: string]: any;
+}
+export declare const DEFAULT_CONNECTION_CONFIG: Partial<SocketConfig>;
+export declare const DEFAULT_CACHE_TTLS: {
+    MSG_RETRY: number;
+};
+export type WAConnectionState = 'open' | 'connecting' | 'close';
+export declare const DisconnectReason: {
+    readonly connectionClosed: 428;
+    readonly connectionLost: 408;
+    readonly loggedOut: 401;
+    readonly timedOut: 408;
+    readonly restartRequired: 515;
+    readonly badSession: 500;
+};
+export interface ConnectionState {
+    connection?: WAConnectionState;
+    lastDisconnect?: {
+        error?: any;
+        date?: Date;
+    };
+    isNewLogin?: boolean;
+    qr?: string;
+    receivedPendingNotifications?: boolean;
+}
+export interface GroupParticipant {
+    id: string;
+    admin?: 'admin' | 'superadmin' | null;
+    phoneNumber?: string;
+    isAdmin?: boolean;
+    isSuperAdmin?: boolean;
+    [key: string]: any;
+}
+export interface GroupMetadata {
+    id: string;
+    owner?: string;
+    subject: string;
+    subjectOwner?: string;
+    subjectTime?: number;
+    creation?: number;
+    desc?: string;
+    descOwner?: string;
+    descId?: string;
+    restrict?: boolean;
+    announce?: boolean;
+    size?: number;
+    participants: GroupParticipant[];
+    ephemeralDuration?: number;
+    inviteCode?: string;
+    author?: string;
+    [key: string]: any;
+}
+export interface Contact {
+    id: string;
+    name?: string;
+    notify?: string;
+    verifiedName?: string;
+    imgUrl?: string | null;
+    status?: string;
+    phoneNumber?: string;
+    lid?: string;
+    [key: string]: any;
+}
+export type AuthenticationCreds = any;
+export type BaileysChat = any;
+export declare const Browsers: {
+    appropriate: (browser: string) => [string, string, string];
+    ubuntu: (browser: string) => [string, string, string];
+};
+export declare function makeCacheableSignalKeyStore(store: any, _logger?: any): any;
+export declare function generateWAMessageFromContent(chatId: string, message: any, options?: any): any;
+export declare function sendInteractiveMessage(sock: any, jid: string, content: any): Promise<any>;
+export type WhatsAppBotConfig = Partial<SocketConfig> & {
     /** Auto carrega o histórico de mensagens ao se conectar */
     autoSyncHistory: boolean;
     /** Lê todas as mensagens falhadas */
@@ -38,7 +127,7 @@ export declare type WhatsAppBotConfig = Partial<SocketConfig> & {
     messageCacheTTL: number;
 };
 /** Identidade de um usuário no WhatsApp. */
-export declare type WAIdentity = {
+export type WAIdentity = {
     /** ID canônico (PN quando conhecido, senão LID) */
     id: string;
     /** JID baseado no número (`@s.whatsapp.net`), quando conhecido */
@@ -49,7 +138,7 @@ export declare type WAIdentity = {
     phoneNumber: string;
 };
 /** Pedido de entrada pendente num grupo. */
-export declare type WAJoinRequest = {
+export type WAJoinRequest = {
     user: User;
     /** Momento do pedido em milissegundos */
     requestedAt?: number;
@@ -57,11 +146,16 @@ export declare type WAJoinRequest = {
     method?: string;
 };
 /** Tempo de fixação aceito pelo WhatsApp: 24 horas, 7 dias ou 30 dias. */
-export declare type WAPinDuration = 86400 | 604800 | 2592000;
+export type WAPinDuration = 86400 | 604800 | 2592000;
 export default class WhatsAppBot extends BotEvents implements IBot {
     /** Versão do WhatsApp Web obtida em tempo de execução (compartilhada entre instâncias). */
     private static latestVersion?;
-    sock: ReturnType<typeof makeWASocket>;
+    sock: any;
+    zapo?: WaClient;
+    get native(): WaClient | undefined;
+    reportError(context: string, err: any): void;
+    hasMessageCache(id: string): boolean;
+    hasListeners(event: string): boolean;
     config: WhatsAppBotConfig;
     auth: IAuth;
     messagesCached: string[];
@@ -73,7 +167,14 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     groupMetadataCache: NodeCache;
     saveCreds: (creds: Partial<AuthenticationCreds>) => Promise<void>;
     connectionListeners: ((update: Partial<ConnectionState>) => boolean)[];
-    DisconnectReason: typeof DisconnectReason;
+    DisconnectReason: {
+        readonly connectionClosed: 428;
+        readonly connectionLost: 408;
+        readonly loggedOut: 401;
+        readonly timedOut: 408;
+        readonly restartRequired: 515;
+        readonly badSession: 500;
+    };
     logger: any;
     id: string;
     /** LID do próprio bot */
@@ -163,6 +264,7 @@ export default class WhatsAppBot extends BotEvents implements IBot {
      * Busca a versão atual (com cache de 6 horas) e usa a versão embutida no Baileys se a busca falhar.
      */
     resolveVersion(): Promise<WAVersion | undefined>;
+    createZapoAdapter(zapo: any): any;
     internalConnect(additionalOptions?: Partial<WhatsAppBot['config']>): Promise<void>;
     reconnect(stopEvents?: boolean, showOpen?: boolean): Promise<void>;
     stop(reason?: any): Promise<void>;
@@ -180,7 +282,7 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     getChatDescription(chat: Chat): Promise<string>;
     setChatDescription(chat: Chat, description: string): Promise<any>;
     getChatProfile(chat: Chat, lowQuality?: boolean): Promise<Buffer>;
-    getChatProfileUrl(chat: Chat, lowQuality?: boolean): Promise<string>;
+    getChatProfileUrl(chat: Chat, lowQuality?: boolean): Promise<any>;
     setChatProfile(chat: Chat, image: Buffer): Promise<void>;
     updateChat(chat: {
         id: string;
@@ -240,7 +342,7 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     getUserDescription(user: User): Promise<string>;
     setUserDescription(user: User, description: string): Promise<void>;
     getUserProfile(user: User, lowQuality?: boolean): Promise<Buffer>;
-    getUserProfileUrl(user: User, lowQuality?: boolean): Promise<string>;
+    getUserProfileUrl(user: User, lowQuality?: boolean): Promise<any>;
     setUserProfile(user: User, image: Buffer): Promise<void>;
     getUser(user: User): Promise<User | null>;
     getUsers(): Promise<string[]>;
@@ -262,7 +364,7 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     getBotDescription(): Promise<string>;
     setBotDescription(description: string): Promise<void>;
     getBotProfile(lowQuality?: boolean): Promise<Buffer>;
-    getBotProfileUrl(lowQuality?: boolean): Promise<string>;
+    getBotProfileUrl(lowQuality?: boolean): Promise<any>;
     setBotProfile(image: Buffer): Promise<void>;
     /**
      * Chave da mensagem no WhatsApp.
@@ -305,7 +407,7 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     addMessageCache(id: string): void;
     downloadStreamMessage(media: Media): Promise<Buffer>;
     experimentalDownloadMediaMessage(media: Media, maxRetryCount?: number): Promise<Buffer>;
-    download(message: proto.WebMessageInfo, type: 'buffer' | 'stream', options: MediaDownloadOptions, ctx?: any): Promise<any>;
+    download(message: proto.IWebMessageInfo, type?: 'buffer' | 'stream', options?: any, ctx?: any): Promise<any>;
     onExists(id: string): Promise<{
         exists: boolean;
         id: string;

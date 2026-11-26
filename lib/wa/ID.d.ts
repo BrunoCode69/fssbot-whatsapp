@@ -1,6 +1,6 @@
 import type { LIDMapper } from './LIDMapper';
 /**
- * Regras de identificação usadas pelo Rompot no WhatsApp (Baileys 7+):
+ * Regras de identificação usadas pelo Rompot no WhatsApp:
  *
  * - Uma mesma pessoa tem dois JIDs: o PN (`5511999999999@s.whatsapp.net`) e o LID (`123456789@lid`).
  * - O Rompot usa **um único ID canônico** por pessoa: o PN quando o número é conhecido,
@@ -32,7 +32,7 @@ export declare function normalizeJid(id?: string | null): string;
 export declare function extractLID(id: string): string | null;
 /**
  * Extrai o LID de uma chave de mensagem, considerando participant (grupos) e remoteJid,
- * além dos campos alternativos `participantAlt` e `remoteJidAlt` do Baileys 7.
+ * além dos campos alternativos `participantAlt` e `remoteJidAlt`.
  */
 export declare function getLIDFromMessage(key: {
     remoteJid?: string | null;

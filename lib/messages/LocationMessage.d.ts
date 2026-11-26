@@ -10,6 +10,12 @@ export default class LocationMessage extends Message {
     latitude: number;
     /** A longitude da localização. */
     longitude: number;
+    /** Nome do local (opcional). */
+    name: string;
+    /** Endereço do local (opcional). */
+    address: string;
+    /** URL do mapa (opcional). */
+    url: string;
     /**
      * Cria uma nova instância de LocationMessage.
      * @param latitude - A latitude da localização (padrão é 0).
@@ -23,11 +29,26 @@ export default class LocationMessage extends Message {
      * @param latitude - A nova latitude.
      * @param longitude - A nova longitude.
      */
-    setLocation(latitude: number, longitude: number): void;
+    setLocation(latitude: number, longitude: number): this;
+    /**
+     * Define o nome do local.
+     * @param name - Nome do local.
+     */
+    setName(name: string): this;
+    /**
+     * Define o endereço do local.
+     * @param address - Endereço textual.
+     */
+    setAddress(address: string): this;
+    /**
+     * Define a URL de mapa ou referência.
+     * @param url - URL do mapa.
+     */
+    setUrl(url: string): this;
     /**
      * @returns O endereço da localização
      */
-    getAddress(): Promise<import("../models/Address").default>;
+    getAddress(): string | Promise<import("../models/Address").default>;
     /**
      * Converte o objeto atual para uma representação em formato JSON.
      * @returns Um objeto JSON que representa o estado atual do objeto.

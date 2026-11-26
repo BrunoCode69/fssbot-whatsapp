@@ -1,6 +1,6 @@
-/// <reference types="node" />
 import ReactionMessage from '../messages/ReactionMessage';
 import { Media } from '../messages/MediaMessage';
+import type { MediaDownloadOptions } from '../utils/MediaUtils';
 import ChatStatus from '../modules/chat/ChatStatus';
 import Message from '../messages/Message';
 import { BotStatus } from './BotStatus';
@@ -28,7 +28,7 @@ export default class BotBase extends BotEvents implements IBot {
     readMessage(message: Message): Promise<void>;
     removeMessage(message: Message): Promise<void>;
     deleteMessage(message: Message): Promise<void>;
-    downloadStreamMessage(media: Media): Promise<Buffer>;
+    downloadStreamMessage(media: Media, options?: MediaDownloadOptions): Promise<Buffer>;
     getBotName(): Promise<string>;
     setBotName(name: string): Promise<void>;
     getBotDescription(): Promise<string>;

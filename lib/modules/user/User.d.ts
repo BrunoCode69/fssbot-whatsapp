@@ -1,4 +1,3 @@
-/// <reference types="node" />
 import type Chat from '../chat/Chat';
 export default class User {
     /** ID do bot associado a este usuário */

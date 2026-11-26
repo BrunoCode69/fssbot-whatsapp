@@ -1,4 +1,3 @@
-/// <reference types="node" />
 import type UserEvent from '../modules/user/UserEvent';
 import type UserAction from '../modules/user/UserAction';
 import type ChatAction from '../modules/chat/ChatAction';
@@ -7,11 +6,11 @@ import Chat from '../modules/chat/Chat';
 import User from '../modules/user/User';
 import Call from '../models/Call';
 import Message from '../messages/Message';
-import type { BlocklistEvent, GroupJoinRequestEvent, GroupUpdateEvent, IdMappingEvent, PresenceEvent } from './BotEventTypes';
+import type { BlocklistEvent, ChatStateEvent, GroupJoinRequestEvent, GroupUpdateEvent, IdMappingEvent, MessageProtocolEvent, MessageUnavailableEvent, PictureEvent, PresenceEvent, ReceiptEvent } from './BotEventTypes';
 /**
  * Mapeia os eventos disponíveis para um bot.
  */
-export declare type BotEventsMap = {
+export type BotEventsMap = {
     /** Ocorre quando o bot é conectado. */
     open: {
         isNewLogin: boolean;
@@ -24,6 +23,8 @@ export declare type BotEventsMap = {
     stop: {
         /** O bot se desconectou */
         isLogout: boolean;
+        /** Motivo da parada */
+        reason?: any;
     };
     /** Ocorre quando a conexão com o bot é fechada. */
     close: {
@@ -63,6 +64,16 @@ export declare type BotEventsMap = {
     blocklist: BlocklistEvent;
     /** [WhatsApp] Um LID foi associado a um número de telefone. */
     'id-mapping': IdMappingEvent;
+    /** [WhatsApp] Confirmação de entrega/leitura de mensagens enviadas. */
+    receipt: ReceiptEvent;
+    /** [WhatsApp] Contato digitando/gravando (requer `subscribePresence`). */
+    chatstate: ChatStateEvent;
+    /** [WhatsApp] Mensagem recebida sem conteúdo (visualização única consumida, etc.). */
+    'message-unavailable': MessageUnavailableEvent;
+    /** [WhatsApp] `protocolMessage` bruto recebido. */
+    'message-protocol': MessageProtocolEvent;
+    /** [WhatsApp] Foto de perfil de contato/grupo alterada. */
+    picture: PictureEvent;
     /** Ocorre quando um erro é detectado. */
     error: Error;
 };

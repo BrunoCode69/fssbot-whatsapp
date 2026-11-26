@@ -7,6 +7,8 @@ export default class TelegramEvents {
     configAll(): void;
     configCallbackQueries(): void;
     configMessage(): void;
+    configChannelPost(): void;
+    configPollAnswer(): void;
     configNewChatMembers(): void;
     configLeftChatMember(): void;
     update(data: User | Chat): Promise<void>;

@@ -3,7 +3,7 @@ import Chat from "../modules/chat/Chat";
 /**
  * Representa uma opção em uma enquete.
  */
-export declare type PollOption = {
+export type PollOption = {
     /** Identificador exclusivo da opção. */
     id: string;
     /** Nome ou descrição da opção. */
@@ -31,7 +31,7 @@ export default class PollMessage extends Message {
         [user: string]: string[];
     };
     /** Chave secreta associada à enquete. */
-    secretKey: Uint8Array;
+    secretKey: Uint8Array | Buffer;
     /** Lista de opções da enquete. */
     options: PollOption[];
     /** Ação relacionada à enquete (Create, Add ou Remove). */

@@ -1,4 +1,3 @@
-/// <reference types="node" />
 import MediaMessage, { Media } from "./MediaMessage";
 import { MessageType } from "./Message";
 import Chat from "../modules/chat/Chat";
@@ -10,6 +9,10 @@ export default class VideoMessage extends MediaMessage {
     readonly type = MessageType.Video;
     /** O tipo MIME do vídeo (padrão é "video/mp4"). */
     mimetype: string;
+    /** Indica se é um vídeo redondo/circular (Push-to-video / Round video note). */
+    isPTV: boolean;
+    /** Duração do vídeo em segundos (0 = desconhecida). */
+    duration: number;
     /**
      * Cria uma nova instância de VideoMessage.
      * @param chat - O chat associado à mensagem de vídeo (opcional).
@@ -23,6 +26,11 @@ export default class VideoMessage extends MediaMessage {
      * @returns Um stream ou recurso representando o vídeo.
      */
     getVideo(): Promise<Buffer>;
+    /**
+     * Define se o vídeo é uma mensagem de vídeo circular (PTV).
+     * @param isPTV - Booleano indicando se é PTV.
+     */
+    setPTV(isPTV?: boolean): this;
     /**
      * Converte o objeto atual para uma representação em formato JSON.
      * @returns Um objeto JSON que representa o estado atual do objeto.

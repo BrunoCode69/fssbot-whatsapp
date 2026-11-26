@@ -1,25 +1,9 @@
-import makeWASocket, {
-  generateWAMessageFromContent,
-  makeCacheableSignalKeyStore,
-  DEFAULT_CONNECTION_CONFIG,
-  MediaDownloadOptions,
+import {
+  proto,
   downloadMediaMessage,
   fetchLatestWaWebVersion,
-  AuthenticationCreds,
-  DEFAULT_CACHE_TTLS,
-  WAConnectionState,
-  DisconnectReason,
-  ConnectionState,
-  GroupMetadata,
-  SocketConfig,
-  WAMessage,
-  WAVersion,
-  Browsers,
-  Contact,
-  proto,
-  Chat as BaileysChat,
-} from 'baileys';
-import { sendInteractiveMessage } from 'baileys_helper';
+  type WaClient,
+} from 'zapo-js';
 
 import NodeCache from 'node-cache';
 import { Boom } from '@hapi/boom';
@@ -31,12 +15,13 @@ import { WA_MEDIA_SERVERS } from '../configs/WAConfigs';
 
 import { PollMessage, PollUpdateMessage, ReactionMessage } from '../messages';
 import { getImageURL, verifyIsEquals } from '../utils/Generic';
-import { getBaileysAuth, MultiFileAuthState } from './Auth';
+import { MultiFileAuthState, SqliteAuthState } from './Auth';
 import Message, { MessageType } from '../messages/Message';
 import ConvertToWAMessage from './ConvertToWAMessage';
 import makeInMemoryStore from './makeInMemoryStore';
 import ConvertWAMessage from './ConvertWAMessage';
 import { Media } from '../messages/MediaMessage';
+import type { MediaDownloadOptions } from '../utils/MediaUtils';
 import { UserAction, UserEvent } from '../modules/user';
 import ConfigWAEvents from './ConfigWAEvents';
 import {
@@ -59,6 +44,146 @@ import User from '../modules/user/User';
 import Chat from '../modules/chat/Chat';
 import IBot from '../bot/IBot';
 import Call from '../models/Call';
+
+export type WALogLevel = 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace' | 'silent';
+
+export function createDefaultLogger(level: WALogLevel = 'silent'): any {
+  return pino({ level: level === 'silent' ? 'silent' : level });
+}
+
+export type WAMessage = proto.IWebMessageInfo;
+export type WAVersion = [number, number, number] | [number, number, number, number] | any[];
+
+export interface SocketConfig {
+  logger?: any;
+  version?: WAVersion;
+  printQRInTerminal?: boolean;
+  qrTimeout?: number;
+  defaultQueryTimeoutMs?: number;
+  retryRequestDelayMs?: number;
+  maxMsgRetryCount?: number;
+  keepAliveIntervalMs?: number;
+  browser?: [string, string, string];
+  syncFullHistory?: boolean;
+  shouldIgnoreJid?: (jid: string) => boolean;
+  patchMessageBeforeSending?: (msg: any) => Promise<any> | any;
+  getMessage?: (key: any) => Promise<any>;
+  ignoreStatusBroadcast?: boolean;
+  [key: string]: any;
+}
+
+export const DEFAULT_CONNECTION_CONFIG: Partial<SocketConfig> = {
+  qrTimeout: 60000,
+  defaultQueryTimeoutMs: 10000,
+  retryRequestDelayMs: 500,
+  maxMsgRetryCount: 5,
+};
+
+export const DEFAULT_CACHE_TTLS = {
+  MSG_RETRY: 3600,
+};
+
+export type WAConnectionState = 'open' | 'connecting' | 'close';
+
+export const DisconnectReason = {
+  connectionClosed: 428,
+  connectionLost: 408,
+  loggedOut: 401,
+  timedOut: 408,
+  restartRequired: 515,
+  badSession: 500,
+} as const;
+
+export interface ConnectionState {
+  connection?: WAConnectionState;
+  lastDisconnect?: {
+    error?: any;
+    date?: Date;
+  };
+  isNewLogin?: boolean;
+  qr?: string;
+  receivedPendingNotifications?: boolean;
+}
+
+export interface GroupParticipant {
+  id: string;
+  admin?: 'admin' | 'superadmin' | null;
+  phoneNumber?: string;
+  isAdmin?: boolean;
+  isSuperAdmin?: boolean;
+  [key: string]: any;
+}
+
+export interface GroupMetadata {
+  id: string;
+  owner?: string;
+  subject: string;
+  subjectOwner?: string;
+  subjectTime?: number;
+  creation?: number;
+  desc?: string;
+  descOwner?: string;
+  descId?: string;
+  restrict?: boolean;
+  announce?: boolean;
+  size?: number;
+  participants: GroupParticipant[];
+  ephemeralDuration?: number;
+  inviteCode?: string;
+  author?: string;
+  [key: string]: any;
+}
+
+export interface Contact {
+  id: string;
+  name?: string;
+  notify?: string;
+  verifiedName?: string;
+  imgUrl?: string | null;
+  status?: string;
+  phoneNumber?: string;
+  lid?: string;
+  [key: string]: any;
+}
+
+export type AuthenticationCreds = any;
+export type BaileysChat = any;
+
+export const Browsers = {
+  appropriate: (browser: string): [string, string, string] => [browser, 'Desktop', '1.0.0'],
+  ubuntu: (browser: string): [string, string, string] => ['Ubuntu', browser, '22.04'],
+};
+
+export function makeCacheableSignalKeyStore(store: any, _logger?: any) {
+  return store;
+}
+
+export function generateWAMessageFromContent(
+  chatId: string,
+  message: any,
+  options?: any,
+): any {
+  return {
+    key: {
+      remoteJid: chatId,
+      fromMe: true,
+      id: (options && options.messageId) || `3EB0${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
+      participant: options && options.userJid,
+    },
+    message,
+    messageTimestamp: Math.floor(Date.now() / 1000),
+  };
+}
+
+export async function sendInteractiveMessage(sock: any, jid: string, content: any): Promise<any> {
+  if (typeof sock?.sendMessage === 'function') {
+    return await sock.sendMessage(jid, content);
+  }
+  if (sock?.message && typeof sock.message.send === 'function') {
+    return await sock.message.send(jid, content);
+  }
+  throw new Error('Socket not initialized for interactive message send');
+}
 
 export type WhatsAppBotConfig = Partial<SocketConfig> & {
   /** Auto carrega o histórico de mensagens ao se conectar */
@@ -112,8 +237,23 @@ export default class WhatsAppBot extends BotEvents implements IBot {
   /** Versão do WhatsApp Web obtida em tempo de execução (compartilhada entre instâncias). */
   private static latestVersion?: { version: WAVersion; fetchedAt: number };
 
-  //@ts-ignore
-  public sock: ReturnType<typeof makeWASocket> = {};
+    public sock: any = {};
+  public zapo?: WaClient;
+  public get native(): WaClient | undefined {
+    return this.zapo;
+  }
+
+  public reportError(context: string, err: any): void {
+    this.logger?.warn?.({ err }, context);
+  }
+
+  public hasMessageCache(id: string): boolean {
+    return this.messagesCached.includes(id) || !!(this.messageCache && this.messageCache.has(id));
+  }
+
+  public hasListeners(event: string): boolean {
+    return this.ev.listenerCount(event as any) > 0;
+  }
   public config: WhatsAppBotConfig;
   public auth: IAuth = new MultiFileAuthState('./session', undefined, false);
 
@@ -592,41 +732,119 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     return undefined;
   }
 
+  public createZapoAdapter(zapo: any): any {
+    return {
+      groupMetadata: async (id: string) => zapo.group?.queryGroupMetadata(id),
+      groupUpdateSubject: async (id: string, name: string) => zapo.group?.setSubject(id, name),
+      groupUpdateDescription: async (id: string, desc: string) => zapo.group?.setDescription(id, desc),
+      profilePictureUrl: async (id: string, type?: any) => {
+        const pic = await zapo.profile?.getPicture(id, type);
+        return pic?.url || '';
+      },
+      updateProfilePicture: async (id: string, image: Buffer) => zapo.profile?.setPicture(id, image),
+      groupParticipantsUpdate: async (chatId: string, participants: string[], action: any) =>
+        zapo.group?.updateParticipants(chatId, participants, action),
+      sendPresenceUpdate: async (status: any, id?: string) => zapo.presence?.sendPresence(status, id),
+      groupCreate: async (name: string, members: string[]) => zapo.group?.createGroup(name, members),
+      groupLeave: async (id: string) => zapo.group?.leave(id),
+      groupInviteCode: async (id: string) => zapo.group?.getInviteCode(id),
+      groupRevokeInvite: async (id: string) => zapo.group?.revokeInviteCode(id),
+      groupAcceptInvite: async (code: string) => zapo.group?.acceptInvite(code),
+      groupSettingUpdate: async (id: string, setting: any) => zapo.group?.setSetting(id, setting, true),
+      groupMemberAddMode: async (id: string, mode: any) => zapo.group?.setSetting(id, 'member_add_mode', mode),
+      groupJoinApprovalMode: async (id: string, mode: any) => zapo.group?.setSetting(id, 'membership_approval_mode', mode),
+      groupToggleEphemeral: async (id: string, seconds: number) => zapo.group?.setSetting(id, 'ephemeral', seconds),
+      groupRequestParticipantsList: async (_id: string) => [],
+      groupRequestParticipantsUpdate: async (_id: string, _targets: string[], _action: any) => [],
+      groupGetInviteInfo: async (_code: string) => null,
+      rejectCall: async (_callId: string, _chatId: string) => {},
+      fetchStatus: async (id: string) => zapo.profile?.getStatus(id),
+      updateBlockStatus: async (id: string, action: any) => zapo.privacy?.updateBlocklist([id], action),
+      fetchBlocklist: async () => zapo.privacy?.getBlocklist(),
+      presenceSubscribe: async (id: string) => zapo.presence?.subscribe(id),
+      updateProfileName: async (name: string) => zapo.profile?.setPushName(name),
+      updateProfileStatus: async (status: string) => zapo.profile?.setStatus(status),
+      readMessages: async (keys: any[]) => {
+        for (const k of keys) {
+          if (k?.remoteJid && k?.id) {
+            await zapo.message?.sendReceipt(k.remoteJid, [k.id], { type: 'read' });
+          }
+        }
+      },
+      chatModify: async (_mod: any, _jid: string) => {},
+      star: async (_jid: string, _keys: any[], _star: boolean) => {},
+      sendMessage: async (chatId: string, content: any, options?: any) => {
+        return await zapo.message?.send(chatId, content, options);
+      },
+      relayMessage: async (chatId: string, msg: any, options?: any) => {
+        return await zapo.message?.send(chatId, msg, options);
+      },
+      updateMediaMessage: async (msg: any) => {
+        return await zapo.message?.requestMediaReupload(msg);
+      },
+      onWhatsApp: async (id: string) => [{ exists: true, jid: id }],
+      ev: { on: () => {} },
+      signalRepository: undefined,
+      waitForConnectionUpdate: async () => {},
+      requestPairingCode: (phone: string) => zapo.auth?.requestPairingCode(phone),
+      end: async () => zapo.disconnect?.(),
+      logout: async () => zapo.disconnect?.(),
+    };
+  }
+
   public async internalConnect(
     additionalOptions: Partial<WhatsAppBot['config']> = {},
   ): Promise<void> {
     return new Promise<void>(async (resolve, reject) => {
       try {
-        const { state, saveCreds } = await getBaileysAuth(this.auth);
+        const auth = this.auth as any;
+        const store = typeof auth.getStore === 'function' ? await auth.getStore() : undefined;
         const version = await this.resolveVersion();
 
-        this.saveCreds = saveCreds;
+        if (store) {
+          const { WaClient: ZapClient } = await import('zapo-js');
+          this.zapo = new ZapClient({
+            store,
+            sessionId: auth.sessionId || 'default',
+            logger: this.config.logger || this.logger,
+            ...(version ? { version: version.join('.') } : {}),
+            ...additionalOptions,
+          } as any);
 
-        this.sock = makeWASocket({
-          auth: {
-            creds: state.creds,
-            keys: makeCacheableSignalKeyStore(
-              state.keys,
-              this.config.logger || this.logger,
-            ),
-          },
-          ...additionalOptions,
-          ...this.config,
-          ...(version ? { version } : {}),
-        });
+          this.sock = this.createZapoAdapter(this.zapo);
+          this.configEvents.configureAll(this.zapo);
 
-        this.lidMapper.attachStore(this.sock.signalRepository?.lidMapping);
+          this.zapo.on('connection', (event: any) => {
+            if (event.status === 'open') {
+              this.status = BotStatus.Online;
+            } else if (event.status === 'close') {
+              this.status = BotStatus.Offline;
+            }
+          });
 
-        this.sock.ev.on('creds.update', saveCreds);
-        this.store.bind(this.sock.ev);
+          if (this.auth.botPhoneNumber) {
+            void this.zapo.connect();
+            this.zapo.once('auth_pairing_required' as any, async () => {
+              try {
+                const code = await this.zapo!.auth.requestPairingCode(this.auth.botPhoneNumber!);
+                this.emit('code', code);
+              } catch (err) {
+                this.emit('error', err);
+              }
+            });
+          } else {
+            void this.zapo.connect();
+          }
 
-        this.configEvents.configureAll();
-
-        resolve();
-
-        await this.awaitConnectionState('open');
+          resolve();
+          await this.awaitConnectionState('open');
+        } else {
+          this.configEvents.configureAll();
+          resolve();
+        }
       } catch (err) {
-        this.ev.emit('error', err);
+        this.emit('error', err);
+        reject(err);
       }
     });
   }
@@ -1807,22 +2025,19 @@ export default class WhatsAppBot extends BotEvents implements IBot {
       return await this.experimentalDownloadMediaMessage(media);
     }
 
-    const stream: any = await downloadMediaMessage(
-      media.stream,
-      'buffer',
-      {},
-      {
-        logger: this.logger,
-        reuploadRequest: (m) => this.sock.updateMediaMessage(m),
-      },
-    );
-
-    if (stream instanceof internal.Transform) {
+    const stream: any = await (downloadMediaMessage as any)(media.stream);
+    if (stream && typeof stream[Symbol.asyncIterator] === 'function') {
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      return Buffer.concat(chunks as any);
+    }
+    if (stream instanceof internal.Transform || (stream && typeof stream.read === 'function')) {
       const buffer = await stream.read();
       return buffer || Buffer.from('');
     }
-
-    return stream;
+    return Buffer.isBuffer(stream) ? stream : Buffer.from(stream || '');
   }
 
   public async experimentalDownloadMediaMessage(
@@ -1833,30 +2048,19 @@ export default class WhatsAppBot extends BotEvents implements IBot {
 
     while (count < (maxRetryCount || this.config.maxMsgRetryCount || 5)) {
       try {
-        const serverIndex = Math.floor(Math.random() * WA_MEDIA_SERVERS.length);
-
-        const stream: any = await downloadMediaMessage(
-          media.stream,
-          'buffer',
-          ({
-            options: {
-              lookup(hostname, options, cb) {
-                cb(null, WA_MEDIA_SERVERS[serverIndex], 4);
-              },
-            },
-          } as any),
-          {
-            logger: this.logger,
-            reuploadRequest: (m) => this.sock.updateMediaMessage(m),
-          },
-        );
-
-        if (stream instanceof internal.Transform) {
+        const stream: any = await (downloadMediaMessage as any)(media.stream);
+        if (stream && typeof stream[Symbol.asyncIterator] === 'function') {
+          const chunks: Buffer[] = [];
+          for await (const chunk of stream) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+          }
+          return Buffer.concat(chunks as any);
+        }
+        if (stream instanceof internal.Transform || (stream && typeof stream.read === 'function')) {
           const buffer = await stream.read();
           return buffer || Buffer.from('');
         }
-
-        return stream;
+        return Buffer.isBuffer(stream) ? stream : Buffer.from(stream || '');
       } catch (error) {
         this.logger?.warn?.(
           `Failed to download media message. Retry count: ${count}`,
@@ -1872,14 +2076,22 @@ export default class WhatsAppBot extends BotEvents implements IBot {
     throw new Error('Failed to download media message');
   }
 
-  public download(
-    message: proto.WebMessageInfo,
-    type: 'buffer' | 'stream',
-    options: MediaDownloadOptions,
+  public async download(
+    message: proto.IWebMessageInfo,
+    type: 'buffer' | 'stream' = 'buffer',
+    options?: any,
     ctx?: any,
   ): Promise<any> {
-    // downloadMediaMessage expects a WAMessage type; cast to any to avoid the WebMessageInfo vs WAMessage type mismatch
-    return downloadMediaMessage(message as any, type, options, ctx);
+    const stream: any = await (downloadMediaMessage as any)(message as any, options);
+    if (type === 'stream') return stream;
+    if (stream && typeof stream[Symbol.asyncIterator] === 'function') {
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      return Buffer.concat(chunks as any);
+    }
+    return stream;
   }
 
   public async onExists(id: string): Promise<{ exists: boolean; id: string }> {

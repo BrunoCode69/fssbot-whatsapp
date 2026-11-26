@@ -1,8 +1,7 @@
-/// <reference types="node" />
 import Message, { MessageType } from './Message';
 import Chat from '../modules/chat/Chat';
 /** Mídia de uma mensagem */
-export declare type Media = {
+export type Media = {
     stream: any;
 };
 export default class MediaMessage extends Message {
@@ -14,8 +13,16 @@ export default class MediaMessage extends Message {
     file: Media | Buffer | string;
     /** Indica se a mídia é um GIF. */
     isGIF: boolean;
+    /** Indica se a mídia é de visualização única (View Once). */
+    viewOnce: boolean;
     /** O nome da mídia. */
     name: string;
+    /** Tamanho da mídia em bytes (0 = desconhecido). */
+    size: number;
+    /** Largura em pixels de imagens, vídeos e figurinhas (0 = desconhecida). */
+    width: number;
+    /** Altura em pixels de imagens, vídeos e figurinhas (0 = desconhecida). */
+    height: number;
     /**
      * Cria uma instância de MediaMessage.
      * @param file - O arquivo de mídia a ser anexado.
@@ -24,6 +31,11 @@ export default class MediaMessage extends Message {
      * @param others - Outros dados a serem injetados na instância (opcional).
      */
     constructor(chat?: Chat | string, text?: string, file?: Media | Buffer | string, others?: Partial<MediaMessage>);
+    /**
+     * Define se a mensagem é de visualização única.
+     * @param viewOnce - Booleano indicando visualização única.
+     */
+    setViewOnce(viewOnce?: boolean): this;
     /**
      * Obtém um stream de dados da mensagem de mídia.
      * @returns Um Buffer contendo os dados da mídia.

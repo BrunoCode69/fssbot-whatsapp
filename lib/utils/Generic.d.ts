@@ -1,4 +1,3 @@
-/// <reference types="node" />
 /**
  * * Aguarda um determinado tempo
  * @param timeout

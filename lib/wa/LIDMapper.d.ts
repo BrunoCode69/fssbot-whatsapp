@@ -1,5 +1,5 @@
 /** Par PN ↔ LID (mesmo formato do Baileys). */
-export declare type LIDPNPair = {
+export type LIDPNPair = {
     lid: string;
     pn: string;
 };
@@ -13,7 +13,7 @@ export interface LIDMappingStoreLike {
     getLIDForPN(pn: string): Promise<string | null>;
     storeLIDPNMappings(pairs: LIDPNPair[]): Promise<void>;
 }
-export declare type LIDMappingListener = (pair: LIDPNPair) => void;
+export type LIDMappingListener = (pair: LIDPNPair) => void;
 /**
  * Mapeia LID ↔ PN e define o ID canônico de cada pessoa.
  *
@@ -94,6 +94,8 @@ export declare class LIDMapper {
         lidToJidCount: number;
         jidToLidCount: number;
     };
+    /** Grava imediatamente todos os pares pendentes no store persistente. */
+    flush(): Promise<void>;
     /** Agrupa os pares a persistir numa única gravação no store do Baileys. */
     private queuePersist;
     private trim;

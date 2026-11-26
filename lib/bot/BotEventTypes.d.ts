@@ -1,7 +1,7 @@
 import type Chat from '../modules/chat/Chat';
 import type User from '../modules/user/User';
 /** Alterações de configuração de um grupo. */
-export declare type GroupUpdateChanges = {
+export type GroupUpdateChanges = {
     /** Novo nome do grupo */
     name?: string;
     /** Nova descrição do grupo */
@@ -20,9 +20,9 @@ export declare type GroupUpdateChanges = {
     ephemeralDuration?: number;
 };
 /** Qual configuração do grupo mudou. */
-export declare type GroupUpdateAction = keyof GroupUpdateChanges;
+export type GroupUpdateAction = keyof GroupUpdateChanges;
 /** Evento `group-update`: configuração de um grupo alterada. */
-export declare type GroupUpdateEvent = {
+export type GroupUpdateEvent = {
     /** Primeira configuração alterada (atalho para `changes`) */
     action: GroupUpdateAction;
     /** Todas as alterações recebidas */
@@ -33,7 +33,7 @@ export declare type GroupUpdateEvent = {
     fromUser?: User;
 };
 /** Evento `group-join-request`: pedido de entrada num grupo com aprovação. */
-export declare type GroupJoinRequestEvent = {
+export type GroupJoinRequestEvent = {
     /** `created` = novo pedido, `revoked` = a pessoa cancelou, `rejected` = um admin recusou */
     action: 'created' | 'revoked' | 'rejected';
     /** Origem do pedido (`invite_link`, `linked_group_join`, `non_admin_add`) */
@@ -46,9 +46,9 @@ export declare type GroupJoinRequestEvent = {
     fromUser?: User;
 };
 /** Presença de um contato. */
-export declare type PresenceStatus = 'available' | 'unavailable' | 'composing' | 'recording' | 'paused';
+export type PresenceStatus = 'available' | 'unavailable' | 'composing' | 'recording' | 'paused';
 /** Evento `presence`: presença atualizada (requer `subscribePresence`). */
-export declare type PresenceEvent = {
+export type PresenceEvent = {
     chat: Chat;
     user: User;
     status: PresenceStatus;
@@ -56,15 +56,92 @@ export declare type PresenceEvent = {
     lastSeen?: number;
 };
 /** Evento `blocklist`: lista de bloqueados alterada. */
-export declare type BlocklistEvent = {
+export type BlocklistEvent = {
     action: 'add' | 'remove' | 'set';
     /** IDs canônicos dos usuários */
     users: string[];
 };
 /** Evento `id-mapping`: o WhatsApp revelou que um LID e um número são a mesma pessoa. */
-export declare type IdMappingEvent = {
+export type IdMappingEvent = {
     lid: string;
     pn: string;
     /** Número em dígitos */
     phoneNumber: string;
+};
+/** Tipo de confirmação recebida. O WhatsApp pode enviar outros valores (`inactive`, ...). */
+export type ReceiptType = 'delivered' | 'read' | 'played' | (string & {});
+/** Evento `receipt`: confirmação de entrega/leitura de mensagens enviadas. */
+export type ReceiptEvent = {
+    /** Chat (ID canônico) das mensagens confirmadas */
+    chatId: string;
+    /** Quem confirmou (ID canônico; em grupos é o participante) */
+    userId: string;
+    /** IDs das mensagens confirmadas (recibos em lote trazem várias) */
+    messageIds: string[];
+    /** Tipo bruto da confirmação */
+    type: ReceiptType;
+    /** Momento da confirmação em milissegundos */
+    timestamp: number;
+    /** `true` quando a confirmação veio de outro dispositivo da própria conta */
+    fromSelfDevice: boolean;
+};
+/** Estado de digitação de um contato. */
+export type ChatStateValue = 'composing' | 'recording' | 'paused';
+/** Evento `chatstate`: contato digitando/gravando (requer `subscribePresence`). */
+export type ChatStateEvent = {
+    chat: Chat;
+    user: User;
+    state: ChatStateValue;
+};
+/**
+ * Evento `message-unavailable`: o servidor entregou só um marcador sem conteúdo.
+ * `reason`: `view_once` (visualização única já consumida), `hosted`, `bot` ou `other`.
+ */
+export type MessageUnavailableEvent = {
+    chat: Chat;
+    user: User;
+    /** ID da mensagem */
+    id: string;
+    reason: string;
+    /** `true` quando o reenvio foi pedido ao celular; o conteúdo chega depois no evento `message` */
+    resendRequested: boolean;
+    /** Momento da mensagem em milissegundos */
+    timestamp: number;
+};
+/**
+ * Evento `message-protocol`: `protocolMessage` bruto recebido (apagar, editar, mensagens
+ * temporárias, sincronização...). Apagadas e editadas também chegam no evento `message`
+ * (`isDeleted` / `isEdited`); este evento serve para os demais tipos e diagnóstico.
+ */
+export type MessageProtocolEvent = {
+    /** Chat (ID canônico) */
+    chatId: string;
+    /** Autor (ID canônico) */
+    userId: string;
+    /** ID da mensagem de protocolo */
+    id: string;
+    /** ID da mensagem alvo, quando houver (ex.: a mensagem apagada/editada) */
+    targetId?: string;
+    /** Valor numérico de `proto.Message.ProtocolMessage.Type` */
+    type: number;
+    /** Nome do tipo (`REVOKE`, `MESSAGE_EDIT`, `EPHEMERAL_SETTING`, ...) */
+    typeName?: string;
+    fromMe: boolean;
+    /** Conteúdo bruto do `protocolMessage` */
+    protocolMessage: unknown;
+};
+/** Evento `picture`: foto de perfil de um contato/grupo/comunidade alterada. */
+export type PictureEvent = {
+    /** Contato/grupo alterado (ID canônico) */
+    id: string;
+    /** `set`, `delete`, `request`, `set_avatar` ou outro valor bruto */
+    action: string;
+    /** Quem fez a alteração, quando diferente de `id` */
+    authorId?: string;
+    /** ID da nova foto (somente em `set`) */
+    pictureId?: number;
+    /** Momento da alteração em milissegundos */
+    timestamp: number;
+    /** Evento bruto do Zapo */
+    raw: unknown;
 };

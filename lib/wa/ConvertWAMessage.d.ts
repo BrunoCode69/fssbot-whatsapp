@@ -1,110 +1,39 @@
-import { MessageUpsertType, proto, WAMessage, WAMessageContent, WAMessageUpdate } from "baileys";
-import Message, { MessageStatus } from "../messages/Message";
-import WhatsAppBot from "./WhatsAppBot";
+import Message, { MessageStatus } from '../messages/Message';
+import WhatsAppBot from './WhatsAppBot';
 export default class ConvertWAMessage {
-    type?: MessageUpsertType;
-    waMessage: WAMessage;
+    type?: any;
+    waMessage: any;
     private message;
     private bot;
-    constructor(bot: WhatsAppBot, waMessage: WAMessage, type?: MessageUpsertType);
-    /**
-     * * Define a mensagem a ser convertida
-     * @param waMessage
-     * @param type
-     */
-    set(waMessage?: WAMessage, type?: MessageUpsertType): void;
-    /**
-     * * Retorna a mensagem convertida
-     */
+    constructor(bot: WhatsAppBot, waMessage: any, type?: any);
+    set(waMessage?: any, type?: any): void;
     get(): Promise<Message>;
+    convertMessage(waMessage: any, type?: any): Promise<void>;
     /**
-     * * Converte a mensagem
-     * @param waMessage
-     * @param type
+     * Converte addons nativos do ZapoJS (reações, votos de enquete, edições)
      */
-    convertMessage(waMessage: WAMessage, type?: MessageUpsertType): Promise<void>;
+    convertAddonMessage(addon: any): Promise<void>;
     /**
-     * * Converte o conteudo da mensagem
-     * @param messageContent
-     * @returns
+     * Desembrulha os contêineres comuns (temporária, visualização única, documento com legenda),
+     * inclusive combinados, até 5 níveis. Marca `isViewOnce` quando passa por visualização única.
      */
-    convertContentMessage(messageContent: proto.IMessage | undefined | null): Promise<void>;
-    /**
-     * * Converte o contexto da mensagem
-     * @param context
-     * @returns
-     */
-    convertContextMessage(context: proto.ContextInfo): Promise<void>;
-    /**
-     * * Converte mensagem de conversa
-     * @param content
-     */
-    convertConversationMessage(content: proto.Message["conversation"]): void;
-    /**
-     * * Converte mensagem de texto
-     * @param content
-     */
-    convertExtendedTextMessage(content: proto.Message["extendedTextMessage"]): void;
-    /**
-     * * Converte mensagem de protocolo
-     * @param content
-     */
-    convertProtocolMessage(content: proto.Message["protocolMessage"]): Promise<void>;
-    /**
-     * * Converte mensagem de localização
-     * @param content
-     */
+    unwrapContainers(messageContent: any): any;
+    convertContentMessage(messageContent: any): Promise<void>;
+    convertContextMessage(context: any): Promise<void>;
+    convertConversationMessage(content: string): void;
+    convertExtendedTextMessage(content: any): void;
+    convertProtocolMessage(content: any): Promise<void>;
     convertLocationMessage(content: any): void;
-    /**
-     * * Converte mensagem com contatos
-     * @param content
-     */
     convertContactMessage(content: any): void;
-    /**
-     * * Converte mensagem de midia
-     * @param content
-     * @param contentType
-     */
-    convertMediaMessage(content: any, contentType: keyof proto.Message): Promise<void>;
-    /**
-     * * Converte uma mensagem de reação
-     * @param content
-     */
+    convertMediaMessage(content: any, contentType: string): Promise<void>;
     convertReactionMessage(content: any): void;
-    /**
-     * * Converte uma mensagem editada
-     * @param content
-     */
-    convertEditedMessage(content: proto.IMessage["protocolMessage"]): Promise<void>;
-    /**
-     * * Converte uma mensagem de enquete
-     * @param content
-     */
-    convertPollCreationMessage(content: proto.Message.PollCreationMessage): Promise<void>;
-    /**
-     * * Converte uma mensagem de enquete atualizada
-     * @param content
-     */
-    convertPollUpdateMessage(content: proto.Message.PollUpdateMessage): Promise<void>;
-    /**
-     * * Converte uma mensagem de botão
-     * @param content
-     * @returns
-     */
-    convertButtonMessage(content: WAMessageContent): void;
-    /**
-     * * Converte uma mensagem de lista
-     * @param content
-     * @returns
-     */
-    convertListMessage(content: WAMessageContent): void;
-    /**
-     * * Converte uma mensagem de botão
-     * @param content
-     * @returns
-     */
-    convertInteractiveMessage(content: WAMessageContent): void;
+    convertEditedMessage(content: any): Promise<void>;
+    convertPollCreationMessage(content: any): Promise<void>;
+    convertPollUpdateMessage(content: any): Promise<void>;
+    convertButtonMessage(content: any): void;
+    convertListMessage(content: any): void;
+    convertInteractiveMessage(content: any): void;
     convertInteractiveResponseMessage(content: any): void;
-    static convertMessageStatus(status?: proto.WebMessageInfo.Status): MessageStatus;
-    static isMessageUpdate(waMessage: any): waMessage is WAMessageUpdate;
+    static convertMessageStatus(status?: any): MessageStatus;
+    static isMessageUpdate(waMessage: any): boolean;
 }

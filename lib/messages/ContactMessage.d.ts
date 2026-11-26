@@ -18,6 +18,13 @@ export default class ContactMessage extends Message {
      */
     constructor(chat?: Chat | string, text?: string, contacts?: Array<User | string>, others?: Partial<ContactMessage>);
     /**
+     * Adiciona um contato à mensagem.
+     * @param name - Nome do contato.
+     * @param phone - Telefone do contato.
+     * @param description - Descrição/organização (opcional).
+     */
+    addContact(name: string, phone: string, description?: string): this;
+    /**
      * Converte o objeto atual para uma representação em formato JSON.
      * @returns Um objeto JSON que representa o estado atual do objeto.
      */

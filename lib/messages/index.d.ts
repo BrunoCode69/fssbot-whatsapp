@@ -1,7 +1,7 @@
 import Message, { MessageType, MessageStatus, MessagePlataform } from "./Message";
-import PollMessage, { PollAction, PollOption } from "./PollMessage";
-import ButtonMessage, { Button, ButtonType } from "./ButtonMessage";
-import ListMessage, { List, ListItem } from "./ListMessage";
+import PollMessage, { PollAction, type PollOption } from "./PollMessage";
+import ButtonMessage, { type Button, ButtonType } from "./ButtonMessage";
+import ListMessage, { type List, type ListItem } from "./ListMessage";
 import PollUpdateMessage from "./PollUpdateMessage";
 import LocationMessage from "./LocationMessage";
 import ReactionMessage from "./ReactionMessage";
@@ -15,4 +15,5 @@ import EmptyMessage from "./EmptyMessage";
 import ErrorMessage from "./ErrorMessage";
 import FileMessage from "./FileMessage";
 import TextMessage from "./TextMessage";
-export { MessageType, MessageStatus, MessagePlataform, Button, ButtonType, List, ListItem, PollAction, PollOption, AudioMessage, ButtonMessage, ContactMessage, EmptyMessage, FileMessage, ImageMessage, ListMessage, LocationMessage, MediaMessage, Message, ErrorMessage, PollMessage, PollUpdateMessage, ReactionMessage, StickerMessage, TextMessage, VideoMessage, };
+export type { Button, List, ListItem, PollOption };
+export { MessageType, MessageStatus, MessagePlataform, ButtonType, PollAction, AudioMessage, ButtonMessage, ContactMessage, EmptyMessage, FileMessage, ImageMessage, ListMessage, LocationMessage, MediaMessage, Message, ErrorMessage, PollMessage, PollUpdateMessage, ReactionMessage, StickerMessage, TextMessage, VideoMessage, };
