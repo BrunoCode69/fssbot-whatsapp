@@ -998,7 +998,8 @@ export default class DiscordBot extends BotEvents implements IBot {
     }
   }
 
-  public async pinMessage(message: Message): Promise<void> {
+  public async pinMessage(message: Message, duration?: number): Promise<void> {
+    if (duration === 0) return await this.unpinMessage(message);
     const channel = await this.fetchSendableChannel(String(message.chat?.id || ''));
     const dMsg = await channel.messages?.fetch?.(String(message.id || ''));
     if (dMsg) await dMsg.pin();

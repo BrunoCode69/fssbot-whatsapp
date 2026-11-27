@@ -34,7 +34,7 @@ export default class TelegramBot extends BotEvents implements IBot {
     removeReaction(message: ReactionMessage): Promise<void>;
     readMessage(message: Message): Promise<void>;
     removeMessage(message: Message): Promise<void>;
-    pinMessage(message: Message, _duration?: number): Promise<void>;
+    pinMessage(message: Message, duration?: number): Promise<void>;
     unpinMessage(message: Message): Promise<void>;
     forwardMessage(chat: Chat, message: Message): Promise<Message>;
     deleteMessage(message: Message): Promise<void>;

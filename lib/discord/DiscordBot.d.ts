@@ -52,7 +52,7 @@ export default class DiscordBot extends BotEvents implements IBot {
     removeMessage(message: Message): Promise<void>;
     addReaction(message: ReactionMessage): Promise<void>;
     removeReaction(message: ReactionMessage): Promise<void>;
-    pinMessage(message: Message): Promise<void>;
+    pinMessage(message: Message, duration?: number): Promise<void>;
     unpinMessage(message: Message): Promise<void>;
     readMessage(_message: Message): Promise<void>;
     private static extractMediaUrl;

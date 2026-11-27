@@ -1,67 +1,84 @@
 # Rompot (fssbot-whatsapp)
 
-Biblioteca moderna para desenvolvimento de ChatBots multi-plataforma em JavaScript/TypeScript, com suporte completo a **WhatsApp** (motorizado por [**ZapoJS**](https://zapo.to/) com persistência em **SQLite**) e **Telegram**.
+Biblioteca moderna para desenvolvimento de ChatBots multi-plataforma em TypeScript/JavaScript, com fachada unificada (`Client`) e suporte completo a:
+
+- **WhatsApp** — motorizado por [**ZapoJS**](https://zapo.to/) com persistência em **SQLite** (`@zapo-js/store-sqlite`) e resolução canônica **PN ↔ LID**.
+- **Telegram** — motorizado por `node-telegram-bot-api`, com Inline Keyboards, Web Apps, Álbuns, Tópicos de Fórum e moderação.
+- **Discord** — motorizado por `discord.js` v14, com **Embeds**, **Botões**, **Select Menus**, **Modais**, **Slash Commands**, **Enquetes**, **Gestão de Servidores/Cargos/Canais/Voz** e Webhooks.
 
 ---
 
 ## 🛠 Recursos
 
-- [x] Motor WhatsApp de alta performance com **ZapoJS 1.11+**
-- [x] Armazenamento unificado e eficiente em **SQLite** (`@zapo-js/store-sqlite`)
-- [x] Suporte nativo a **Botões Interativos** (Quick Reply) e **Listas** (Single Select)
-- [x] Descriptografia automática de **votos de enquetes**, **reações** e **edições** via `message_addon`
-- [x] Resolução canônica de identidades **PN ↔ LID** com persistência no SQLite
-- [x] Acesso direto ao cliente nativo tipado via `bot.native` (`WaClient`)
-- [x] Módulo **Telegram** integrado
-- [x] Sistema de comandos e mensagens estruturadas
+- [x] Fachada única `Client` para **WhatsApp**, **Telegram** e **Discord**
+- [x] Motor WhatsApp de alta performance com **ZapoJS 1.11+** e armazenamento unificado em **SQLite**
+- [x] Resolução canônica de identidades **PN ↔ LID** no WhatsApp com persistência automática
+- [x] Componentes interativos nativos: **Botões**, **Listas / Select Menus**, **Embeds**, **Modais** e **Slash Commands**
+- [x] **Enquetes (Polls)** e captura unificada de votos (`pollUpdate`) nas três plataformas
+- [x] Download seguro de mídias em memória (`downloadStreamMessage`) ou direto em disco via streaming (`downloadMediaToFile`) com `maxBytes`, `timeoutMs` e `AbortSignal`
+- [x] Acesso direto aos clientes nativos quando necessário (`bot.native` no WhatsApp, `bot.bot` no Telegram e `bot.discord` no Discord)
 
-| Recursos | WhatsApp (ZapoJS + SQLite) | Telegram |
-| :--- | :---: | :---: |
-| Recebimento de mensagens | ✅ | ✅ |
-| Envio de texto e menções | ✅ | ✅ |
-| Envio de mídias (imagem, vídeo, áudio/PTT, arquivos) | ✅ | ✅ |
-| Envio de figurinhas / stickers com metadados | ✅ | ✅ |
-| Envio de botões interativos (Quick Reply) | ✅ | ✅ (Inline Keyboard) |
-| Envio de listas interativas (Single Select) | ✅ | ❌ |
-| Envio de enquetes (Polls) e captura de votos | ✅ | ✅ |
-| Reações em mensagens | ✅ | ❌ |
-| Fixação e desafixação de mensagens (Pin) | ✅ | ✅ |
-| Edição de mensagens | ✅ | ✅ |
-| Gestão de grupos (membros, permissões, convites, aprovações) | ✅ | ✅ |
-| Canais / Newsletters | ✅ (`bot.native.newsletter`) | 🔧 |
+| Recurso | WhatsApp (ZapoJS + SQLite) | Telegram | Discord (discord.js v14) |
+| :--- | :---: | :---: | :---: |
+| Recebimento de mensagens, menções e citações (`mention`) | ✅ | ✅ | ✅ |
+| Envio e download em stream de mídias (imagem, vídeo, áudio, arquivos) | ✅ | ✅ | ✅ |
+| Envio e recebimento de figurinhas / stickers | ✅ | ✅ | ✅ |
+| Botões interativos (`ButtonMessage` / URL / estilos) | ✅ | ✅ (Inline + WebApp) | ✅ (5 estilos + Emoji + URL) |
+| Listas / Menus de seleção (`ListMessage`) | ✅ (Single Select) | ❌ | ✅ (String, User, Role, Channel, Mentionable) |
+| Embeds ricos (`discordEmbed` / `discordEmbeds`) | ❌ | ❌ | ✅ |
+| Slash Commands, Modais e respostas efêmeras | ❌ | ❌ | ✅ |
+| Enquetes (`PollMessage`) e captura de votos (`pollUpdate`) | ✅ | ✅ | ✅ |
+| Reações em mensagens (`addReaction` / `removeReaction`) | ✅ | ✅ | ✅ |
+| Edição de mensagens (`editMessage`) | ✅ (texto) | ✅ (texto e teclado) | ✅ (texto, embeds e componentes) |
+| Fixação e desafixação de mensagens (`pinMessage` / `unpinMessage`) | ✅ | ✅ | ✅ |
+| Gestão de grupos (membros, admins, convites) | ✅ | ✅ | — *(usa Servidores)* |
+| Gestão de servidores, cargos, canais, threads e voz | — | 🔧 (Tópicos/Fórum) | ✅ |
 
 ---
 
 ## 📦 Instalação
 
 ```bash
-# Com npm
-npm install rompot zapo-js @zapo-js/store-sqlite
-
 # Com bun
-bun add rompot zapo-js @zapo-js/store-sqlite
+bun add rompot
+
+# Com npm
+npm install rompot
 ```
 
 Importação:
 
 ```ts
-// TypeScript
-import Client, { WhatsAppBot, SqliteAuthState, MultiFileAuthState, TelegramBot } from "rompot";
+// TypeScript / ESM
+import {
+  Client,
+  WhatsAppBot,
+  TelegramBot,
+  DiscordBot,
+  SqliteAuthState,
+  MultiFileAuthState,
+} from "rompot";
 
-// JavaScript
-const { Client, WhatsAppBot, SqliteAuthState, MultiFileAuthState, TelegramBot } = require("rompot");
+// CommonJS
+const {
+  Client,
+  WhatsAppBot,
+  TelegramBot,
+  DiscordBot,
+  SqliteAuthState,
+} = require("rompot");
 ```
 
 ---
 
-## 🚀 WhatsApp
+## 🚀 WhatsApp (`WhatsAppBot`)
 
 ### Conexão via QR Code
 
-Por padrão, a sessão é salva em um banco SQLite (`session.sqlite`). Na primeira conexão, o evento `qr` emitirá a string para você exibir no terminal ou gerar a imagem:
+Por padrão, a sessão é salva em um único banco SQLite (`session.sqlite`). Na primeira conexão, o evento `qr` emite a string para exibir no terminal ou gerar QR Code em imagem:
 
 ```ts
-import Client, { WhatsAppBot, SqliteAuthState } from "rompot";
+import { Client, WhatsAppBot, SqliteAuthState } from "rompot";
 
 const bot = new WhatsAppBot();
 const client = new Client(bot);
@@ -74,321 +91,46 @@ client.on("open", () => {
   console.log("WhatsApp conectado com sucesso!");
 });
 
-// Salva em ./sessions/session.sqlite
 const auth = new SqliteAuthState("./sessions");
 await client.connect(auth);
 ```
 
 ### Conexão via Código de Pareamento (Phone Number)
 
-Para conectar sem câmera usando o código de 8 dígitos enviado pelo WhatsApp:
+Para conectar sem câmera usando o código de 8 dígitos do WhatsApp:
 
 ```ts
-import Client, { WhatsAppBot, SqliteAuthState } from "rompot";
+import { Client, WhatsAppBot, SqliteAuthState } from "rompot";
 
 const bot = new WhatsAppBot();
 const client = new Client(bot);
 
 client.on("code", (code) => {
-  console.info(`Digite este código no seu celular: ${code}`);
+  console.info("Digite este código no seu celular:", code);
 });
 
-// Informe o número em formato internacional (apenas dígitos)
-const botPhoneNumber = "5511991234567";
-const auth = new SqliteAuthState("./sessions", botPhoneNumber);
-
+// Número em formato internacional (apenas dígitos)
+const auth = new SqliteAuthState("./sessions", "5511991234567");
 await client.connect(auth);
 ```
 
-> **Nota de Compatibilidade:** Se seu código usa `MultiFileAuthState("./sessions", botPhoneNumber)`, ele continua funcionando perfeitamente — internamente ele herda de `SqliteAuthState` e armazena os dados no SQLite de forma robusta e compacta.
+> **Compatibilidade:** `MultiFileAuthState("./sessions", botPhoneNumber)` permanece disponível e herda internamente de `SqliteAuthState`.
+
+### Armazenamento SQLite & Identidades PN ↔ LID
+
+O módulo utiliza o driver SQLite nativo (`bun:sqlite` no Bun ou `node:sqlite` no Node 22+):
+
+- **Domínios ZapoJS**: `auth`, `signal`, `preKey`, `session`, `identity`, `senderKey`, `appState`, `privacyToken`, `messages`, `threads` e `contacts`.
+- **Tabelas internas do Rompot**: `rompot_records` (chats, usuários e enquetes) e `rompot_lid_mapping` (mapeamentos permanentes `LID ↔ PN`).
+- **ID Canônico**: `message.user.id` entrega sempre o **PN** (`5511999999999@s.whatsapp.net`) quando conhecido, ou o **LID** (`123456789@lid`) apenas se o número estiver oculto. Use `await client.resolveId(id)` e `await client.getUserIdentity(id)` para consultar todos os identificadores.
+- **Cliente nativo**: `bot.native` expõe diretamente a instância tipada `WaClient` do ZapoJS (`message`, `newsletter`, `group`, `profile`, `privacy`).
 
 ---
 
-## 🗄️ Armazenamento em SQLite
-
-Diferente das versões antigas que geravam milhares de arquivos JSON em disco, o novo módulo utiliza o driver SQLite nativo (`bun:sqlite` no Bun ou `node:sqlite` no Node 22+):
-
-- **Domínios ZapoJS**: `auth`, `signal`, `preKey`, `session`, `identity`, `senderKey`, `appState`, `privacyToken`, `messages`, `threads`, `contacts`.
-- **Tabelas internas do Rompot**:
-  - `rompot_records`: Armazena registros de chats (`chats-*`), usuários (`users-*`) e enquetes (`polls-*`).
-  - `rompot_lid_mapping`: Armazena permanentemente os mapeamentos `LID ↔ PN` aprendidos.
-
----
-
-## ⚡ Acesso Direto ao ZapoJS (`bot.native`)
-
-Para recursos avançados ou futuros da BDFW, você pode acessar diretamente a instância de `WaClient` através de `bot.native`:
+## ✈️ Telegram (`TelegramBot`)
 
 ```ts
-const bot = new WhatsAppBot();
-const client = new Client(bot);
-await client.connect(auth);
-
-// Acesso aos coordinators nativos do ZapoJS:
-const zapo = bot.native;
-
-// Envio nativo
-await zapo.message.send("5511999999999", "Olá!");
-
-// Newsletters / Canais
-const channel = await zapo.newsletter.queryMetadata("120363@newsletter");
-
-// Grupos
-const metadata = await zapo.group.queryGroupMetadata("120363@g.us");
-
-// Perfil e Privacidade
-await zapo.profile.setPushName("Meu Bot");
-const blocklist = await zapo.privacy.getBlocklist();
-```
-
----
-
-## 💬 Mensagens
-
-### Texto e Menções
-
-```ts
-import { Message } from "rompot";
-
-// Envio simples
-await client.sendMessage(chat, "Olá mundo!");
-
-// Mensagem com menções e citação
-const msg = new Message(chat, "Olá @5511999999999!");
-msg.mentions = ["5511999999999@s.whatsapp.net"];
-msg.mention = originalMessage; // citação / reply
-await client.send(msg);
-
-// Editar mensagem
-await client.editMessage(msg, "Texto corrigido!");
-
-// Apagar mensagem para todos (Revoke)
-await client.deleteMessage(msg);
-
-// Reagir
-await client.addReaction(msg, "❤️");
-await client.removeReaction(msg);
-
-// Fixar mensagem (Pin)
-await client.pinMessage(msg, 604800); // 24h (86400), 7d (604800) ou 30d (2592000)
-```
-
-### Mídias
-
-```ts
-import { ImageMessage, VideoMessage, AudioMessage, FileMessage, StickerMessage } from "rompot";
-
-// Imagem
-const image = new ImageMessage(chat, "Legenda da imagem", imageBuffer);
-await client.send(image);
-
-// Áudio / Nota de Voz (PTT)
-const audio = new AudioMessage(chat, audioBuffer);
-audio.isPTT = true; // envia como gravação de voz
-await client.send(audio);
-
-// Vídeo (ou GIF)
-const video = new VideoMessage(chat, "Vídeo demonstrativo", videoBuffer);
-video.isGIF = true; // reprodução contínua sem áudio
-await client.send(video);
-
-// Documento / Arquivo
-const file = new FileMessage(chat, "Relatório PDF", fileBuffer);
-file.name = "relatorio.pdf";
-file.mimetype = "application/pdf";
-await client.send(file);
-
-// Figurinha / Sticker
-const sticker = new StickerMessage(chat, stickerBuffer);
-sticker.pack = "Meu Pack";
-sticker.author = "Rompot Bot";
-await client.send(sticker);
-
-// Baixar mídia recebida
-const buffer = await client.downloadStreamMessage(incomingMediaMessage);
-```
-
-### Botões Interativos (Quick Reply)
-
-Os botões utilizam as mensagens interativas nativas do WhatsApp (`nativeFlowMessage`):
-
-```ts
-import { ButtonMessage } from "rompot";
-
-const buttons = new ButtonMessage(chat, "Escolha uma opção:", "Rodapé opcional");
-buttons.addReply("Opção 1", "btn_1");
-buttons.addReply("Opção 2", "btn_2");
-buttons.addReply("Suporte", "btn_support");
-
-await client.send(buttons);
-```
-
-### Listas Interativas (Single Select)
-
-```ts
-import { ListMessage } from "rompot";
-
-const list = new ListMessage(chat, "Selecione um produto do cardápio:", "Abrir Cardápio", "Cardápio", "Preços válidos hoje");
-const lanches = list.addCategory("Lanches");
-list.addItem(lanches, "X-Burger", "Pão, carne e queijo", "item_burger");
-list.addItem(lanches, "X-Salada", "Com salada fresca", "item_salada");
-
-const bebidas = list.addCategory("Bebidas");
-list.addItem(bebidas, "Suco Natural", "Laranja ou Maracujá", "item_suco");
-
-await client.send(list);
-```
-
-### Enquetes (Polls)
-
-```ts
-import { PollMessage } from "rompot";
-
-const poll = new PollMessage(chat, "Qual seu framework favorito?");
-poll.addOption("ZapoJS", "opt_zapo");
-poll.addOption("Outro", "opt_outro");
-poll.extra.selectableCount = 1; // 1 = escolha única
-
-await client.send(poll);
-```
-
----
-
-## 👥 IDs no WhatsApp: PN e LID
-
-No WhatsApp atual, um contato possui dois identificadores:
-- **PN (Phone Number)**: `5511999999999@s.whatsapp.net`
-- **LID (Linked Identity)**: `123456789@lid`
-
-O Rompot padroniza tudo para **um único ID canônico**:
-- O **PN** sempre que o número for conhecido;
-- O **LID** apenas se o número estiver oculto (ex: grupos anônimos).
-
-```ts
-message.user.id;          // ID canônico (PN quando conhecido)
-message.user.phoneNumber; // "5511999999999" (vazio se oculto)
-message.user.lid;         // "123456789@lid"
-
-// Resolução de ID
-const pn = await client.resolveId("123456789@lid");
-const identity = await client.getUserIdentity("5511999999999");
-// -> { id, pn, lid, phoneNumber }
-```
-
----
-
-## 📡 Eventos do Cliente
-
-```ts
-// Conexão
-client.on("open", ({ isNewLogin }) => console.log("Conectado! Novo login:", isNewLogin));
-client.on("close", ({ reason }) => console.log("Desconectado:", reason));
-client.on("stop", ({ isLogout, reason }) => console.log("Parado. Logout:", isLogout));
-client.on("qr", (qr) => { ... });
-client.on("code", (code) => { ... });
-
-// Mensagens recebidas
-client.on("message", async (message) => {
-  if (message.fromMe) return;
-
-  // Resposta a botões ou listas
-  if (message.selected) {
-    console.log(`Usuário clicou no item/botão ID: ${message.selected}`);
-  }
-
-  // Voto em enquete
-  if (message.type === "pollUpdate") {
-    console.log(`Voto alterado: ${message.text} (ação: ${message.action})`);
-  }
-
-  // Comando simples
-  if (message.text === "!ping") {
-    await message.reply("Pong via ZapoJS! 🏓");
-  }
-});
-
-// Eventos de usuários em grupos
-client.on("user", ({ action, event, chat, user, fromUser }) => {
-  // action: 'join' | 'leave' | 'add' | 'remove' | 'promote' | 'demote'
-});
-
-// Configuração de grupo alterada
-client.on("group-update", ({ action, changes, chat, fromUser }) => {
-  // action: 'name' | 'description' | 'announce' | 'restrict' | 'inviteCode' | 'memberAddMode' | 'joinApprovalMode' | 'ephemeralDuration'
-});
-
-// Pedido de entrada em grupo com aprovação
-client.on("group-join-request", ({ action, method, chat, user, fromUser }) => {
-  // action: 'created' | 'revoked' | 'rejected'
-});
-
-// Presença e status
-client.on("presence", ({ chat, user, status, lastSeen }) => {
-  // status: 'available' | 'unavailable' | 'composing' | 'recording' | 'paused'
-});
-
-// Chamadas
-client.on("call", (call) => {
-  console.log(`Chamada recebida de: ${call.user.id}`);
-  // Rejeitar chamada se desejado:
-  client.rejectCall(call);
-});
-
-// Lista de bloqueados
-client.on("blocklist", ({ action, users }) => {
-  console.log("Blocklist atualizada:", users);
-});
-
-// Mapeamento de LID aprendido
-client.on("id-mapping", ({ lid, pn, phoneNumber }) => {
-  console.log(`LID ${lid} mapeado para ${pn} (${phoneNumber})`);
-});
-```
-
----
-
-## 🤖 Gestão de Grupos
-
-```ts
-// Informações do grupo
-const admins = await client.getChatAdmins(chat);
-const users = await client.getChatUsers(chat);
-const leader = await client.getChatLeader(chat);
-
-// Alterações administrativas
-await client.setChatName(chat, "Novo Nome");
-await client.setChatDescription(chat, "Nova Descrição");
-await client.setChatProfile(chat, imageBuffer);
-await client.setChatAnnounce(chat, true); // apenas admins enviam mensagens
-await client.setChatLocked(chat, true);   // apenas admins alteram dados do grupo
-await client.setChatEphemeral(chat, 604800); // mensagens temporárias de 7 dias
-await client.setChatMemberAddMode(chat, false); // apenas admins adicionam membros
-await client.setChatJoinApproval(chat, true); // entrada exige aprovação
-
-// Membros
-await client.addUserInChat(chat, user);
-await client.removeUserInChat(chat, user);
-await client.promoteUserInChat(chat, user);
-await client.demoteUserInChat(chat, user);
-
-// Pedidos de entrada
-const requests = await client.getChatJoinRequests(chat);
-await client.updateChatJoinRequests(chat, [user], "approve"); // ou "reject"
-
-// Convites
-const inviteCode = await client.getChatInvite(chat);
-await client.revokeChatInvite(chat);
-await client.joinChat("https://chat.whatsapp.com/CODIGO");
-```
-
----
-
-## ✈️ Telegram
-
-O módulo Telegram permanece disponível para bots do Telegram:
-
-```ts
-import Client, { TelegramBot } from "rompot";
+import { Client, TelegramBot, ButtonMessage } from "rompot";
 
 const bot = new TelegramBot();
 const client = new Client(bot);
@@ -398,12 +140,272 @@ client.on("open", () => {
 });
 
 client.on("message", async (msg) => {
+  if (msg.fromMe) return;
+
   if (msg.text === "/start") {
-    await msg.reply("Olá pelo Telegram!");
+    const menu = new ButtonMessage(msg.chat, "Bem-vindo ao bot!");
+    menu.addReply("Ver Planos", "ver_planos");
+    menu.addUrl("Documentação", "https://bdfw.com.br/doc");
+    menu.addWebApp("Abrir Mini App", "https://app.exemplo.com");
+    await client.send(menu);
   }
 });
 
 await client.connect("SEU_TELEGRAM_BOT_TOKEN");
+```
+
+Recursos adicionais expostos no `Client` para Telegram incluem: `answerCallbackQuery`, `banTelegramMember`, `unbanTelegramMember`, `muteTelegramMember`, `unmuteTelegramMember`, `sendDice`, `sendChatAction`, `sendMediaGroup` (álbuns), `createForumTopic`, `closeForumTopic`, `reopenForumTopic`, `deleteForumTopic`, `createInviteLink`, `approveChatJoinRequest` e `declineChatJoinRequest`.
+
+---
+
+## 🎮 Discord (`DiscordBot`)
+
+### Conexão e Gateway Intents
+
+O `DiscordBot` aceita uma lista de nomes de intents (`DiscordIntentKey[]`) ou um bitmask numérico via `resolveDiscordIntents`. Quando omitido, usa `DEFAULT_DISCORD_INTENTS`:
+
+```ts
+import { Client, DiscordBot } from "rompot";
+
+const bot = new DiscordBot({
+  intents: [
+    "Guilds",
+    "GuildMessages",
+    "MessageContent",
+    "GuildMembers",
+    "GuildVoiceStates",
+    "GuildMessageReactions",
+    "GuildMessagePolls",
+    "DirectMessages",
+  ],
+});
+const client = new Client(bot);
+
+client.on("open", () => {
+  console.log("Bot Discord online como:", bot.name);
+});
+
+await client.connect("SEU_DISCORD_BOT_TOKEN");
+```
+
+> **Nota sobre Intents Privilegiadas:** `MessageContent`, `GuildMembers` e `GuildPresences` exigem ativação prévia no [Discord Developer Portal](https://discord.com/developers/applications) (*Bot → Privileged Gateway Intents*).
+
+### Embeds, Botões, Select Menus, Slash Commands e Modais
+
+```ts
+import { ButtonMessage, ListMessage, Message } from "rompot";
+
+// 1. Mensagem com Embed + Botões estilizados
+const painel = new ButtonMessage(channelId, "Gerencie seu atendimento:");
+painel.extra = {
+  discordEmbed: {
+    title: "Central de Suporte",
+    description: "Clique em um dos botões abaixo para continuar.",
+    color: "#5865F2",
+    fields: [{ name: "Status", value: "Online", inline: true }],
+    footer: "Rompot Discord",
+    timestamp: true,
+  },
+};
+painel.addReply("Abrir Ticket", "abrir_ticket", "success", "🎫");
+painel.addReply("Cancelar", "cancelar", "danger", "✖️");
+painel.addUrl("Site Oficial", "https://bdfw.com.br");
+const enviada = await client.send(painel);
+
+// Edição rica de mensagens no Discord (texto, embeds e componentes)
+const atualizado = new Message(channelId, "");
+atualizado.id = enviada.id;
+atualizado.extra = {
+  discordEmbed: { title: "Ticket iniciado!", color: "#57F287" },
+};
+await bot.editMessage(atualizado);
+
+// 2. Select Menus (string, user, role, channel ou mentionable)
+const menuCargos = new ListMessage(channelId, "Selecione os cargos:");
+menuCargos.selectType = "role";
+menuCargos.minValues = 1;
+menuCargos.maxValues = 3;
+await client.send(menuCargos);
+
+// 3. Registro de Slash Commands (com suporte a opções tipadas e anexos)
+await client.registerSlashCommands([
+  {
+    name: "decrypt",
+    description: "Processa um arquivo enviado",
+    options: [
+      { name: "arquivo", description: "Anexo para análise", type: "attachment", required: false },
+    ],
+  },
+]);
+
+// 4. Respostas efêmeras e Modais em interações
+client.on("discord-interaction", async (ev) => {
+  if (ev.kind === "button" && ev.customId === "abrir_ticket") {
+    await client.showDiscordModal(ev.interactionId, {
+      id: "modal_ticket",
+      title: "Novo Ticket",
+      inputs: [
+        { id: "assunto", label: "Assunto", style: "short", required: true },
+        { id: "detalhes", label: "Descrição", style: "paragraph", required: true },
+      ],
+    });
+  }
+});
+
+client.on("discord-modal", async (ev) => {
+  await client.replyInteraction(
+    ev.interactionId,
+    "Ticket registrado: " + ev.fields.assunto,
+    true, // ephemeral
+  );
+});
+```
+
+### Gestão de Servidores, Cargos, Canais, Moderação e Voz
+
+No Discord, a administração de comunidades utiliza métodos dedicados de **Servidor (Guild)**:
+
+- **Servidor**: `isServerAdmin`, `isServerMember`, `getServerMembers`, `getServerAdmins`, `getServerInvite`, `setServerName`, `setServerDescription`, `setServerIcon`, `leaveServer`.
+- **Cargos e Permissões**: `addRoleToUser`, `removeRoleFromUser`, `userHasRole`, `getMemberRoles`, `createGuildRole`, `deleteGuildRole`, `userHasPermission`.
+- **Moderação**: `timeoutMember`, `kickMember`, `banGuildMember`, `unbanGuildMember`, `setMemberNickname`, `purgeMessages`.
+- **Canais, Threads e Webhooks**: `createGuildChannel`, `deleteGuildChannel`, `setChannelTopic`, `setChannelSlowmode`, `setChannelPermission`, `createThread`, `archiveThread`, `lockThread`, `sendDiscordWebhook`.
+- **Voz e Presença**: `moveVoiceMember`, `muteVoiceMember`, `deafenVoiceMember`, `disconnectVoiceMember`, `setBotActivity`.
+- **Cliente nativo**: `bot.discord` expõe a instância completa de `Client` do `discord.js`.
+
+---
+
+## 💬 Mensagens, Mídias e Download em Stream
+
+As classes de mensagem são compartilhadas entre **WhatsApp**, **Telegram** e **Discord**:
+
+```ts
+import {
+  Message,
+  ImageMessage,
+  VideoMessage,
+  AudioMessage,
+  FileMessage,
+  StickerMessage,
+  PollMessage,
+} from "rompot";
+
+// Texto, menções e citação (reply)
+const msg = new Message(chat, "Olá!");
+msg.mention = originalMessage;
+await client.send(msg);
+
+// Reações, fixação e exclusão
+await client.addReaction(msg, "✅");
+await client.pinMessage(msg);
+await client.unpinMessage(msg);
+await client.deleteMessage(msg);
+
+// Envio de arquivos e mídias
+const doc = new FileMessage(chat, "Segue o relatório", fileBuffer, {
+  name: "relatorio.pdf",
+  mimetype: "application/pdf",
+});
+await client.send(doc);
+
+// Enquetes (WhatsApp, Telegram e Discord)
+const poll = new PollMessage(chat, "Qual sua plataforma principal?");
+poll.addOption("WhatsApp", "wa");
+poll.addOption("Telegram", "tg");
+poll.addOption("Discord", "dc");
+await client.send(poll);
+
+// Download de mídia recebida (memória ou streaming direto para arquivo com limite de bytes)
+const buffer = await client.downloadStreamMessage(incomingMediaMsg, {
+  maxBytes: 25 * 1024 * 1024,
+  timeoutMs: 30_000,
+});
+
+await client.downloadMediaToFile(incomingMediaMsg, "./tmp/anexo.bin", {
+  maxBytes: 50 * 1024 * 1024,
+  timeoutMs: 60_000,
+});
+```
+
+---
+
+## 📡 Eventos do Cliente
+
+```ts
+// Ciclo de vida da conexão
+client.on("connecting", () => {});
+client.on("open", (info) => console.log("Conectado:", info));
+client.on("reconnecting", () => console.log("Reconectando..."));
+client.on("close", (info) => console.log("Conexão encerrada:", info));
+client.on("stop", ({ isLogout }) => console.log("Parado. Logout:", isLogout));
+client.on("error", (err) => console.error("Erro:", err));
+
+// Autenticação WhatsApp
+client.on("qr", (qr) => {});
+client.on("code", (code) => {});
+
+// Mensagens, botões, listas/selects e votos de enquete
+client.on("message", async (message) => {
+  if (message.fromMe) return;
+
+  if (message.selected) {
+    console.log("Item/botão selecionado:", message.selected);
+  }
+  if (message.type === "pollUpdate") {
+    console.log("Voto de enquete:", message.text, message.action);
+  }
+});
+
+// Comunidade e presença
+client.on("user", ({ action, chat, user, fromUser }) => {});
+client.on("presence", ({ chat, user, status }) => {});
+
+// Específicos de WhatsApp
+client.on("group-update", (ev) => {});
+client.on("group-join-request", (ev) => {});
+client.on("call", (call) => client.rejectCall(call));
+client.on("id-mapping", ({ lid, pn, phoneNumber }) => {});
+
+// Específicos de Discord
+client.on("discord-interaction", (ev) => {});
+client.on("discord-modal", (ev) => {});
+client.on("voice-state", (ev) => {});
+```
+
+---
+
+## 👥 Gestão de Grupos (WhatsApp & Telegram)
+
+```ts
+const admins = await client.getChatAdmins(chat);
+const members = await client.getChatUsers(chat);
+const leader = await client.getChatLeader(chat);
+
+await client.setChatName(chat, "Novo Nome do Grupo");
+await client.setChatDescription(chat, "Nova Descrição");
+await client.setChatProfile(chat, imageBuffer);
+
+await client.addUserInChat(chat, user);
+await client.removeUserInChat(chat, user);
+await client.promoteUserInChat(chat, user);
+await client.demoteUserInChat(chat, user);
+
+const invite = await client.getChatInvite(chat);
+
+// Controles exclusivos de grupos WhatsApp
+await client.setChatAnnounce(chat, true);
+await client.setChatLocked(chat, true);
+await client.setChatEphemeral(chat, 604800);
+await client.setChatJoinApproval(chat, true);
+```
+
+---
+
+## 🧪 Build e Testes
+
+Sempre que alterar arquivos em `src/`, recompile `lib/` e rode a suíte de testes:
+
+```bash
+bun run clean && bun run tsc && bun test
 ```
 
 ---

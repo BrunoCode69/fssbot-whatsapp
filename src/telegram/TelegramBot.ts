@@ -154,7 +154,8 @@ export default class TelegramBot extends BotEvents implements IBot {
     await this.deleteMessage(message);
   }
 
-  public async pinMessage(message: Message, _duration?: number): Promise<void> {
+  public async pinMessage(message: Message, duration?: number): Promise<void> {
+    if (duration === 0) return await this.unpinMessage(message);
     await this.bot.pinChatMessage(Number(message.chat.id), Number(message.id));
   }
 
