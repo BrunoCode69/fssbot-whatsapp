@@ -28,7 +28,10 @@ import { sleep, getError } from '../utils/Generic';
 import {
   type MediaDownloadOptions,
   createMediaTooLargeError,
+  downloadMediaFromURL,
+  downloadMediaFromURLToFile,
   getMediaMaxBytes,
+  isHttpUrl,
 } from '../utils/MediaUtils';
 import MessageHandler, { type MessageHandlerConfig } from '../utils/MessageHandler';
 import Call from '../models/Call';
@@ -643,6 +646,10 @@ export default class Client<Bot extends IBot = IBot>
     }
 
     if (typeof message.file == 'string') {
+      if (isHttpUrl(message.file)) {
+        return await downloadMediaFromURL(message.file, options);
+      }
+
       if (maxBytes) {
         const size = statSync(message.file).size;
         if (size > maxBytes) throw createMediaTooLargeError(maxBytes, size);
@@ -684,6 +691,11 @@ export default class Client<Bot extends IBot = IBot>
     }
 
     if (typeof message.file == 'string') {
+      if (isHttpUrl(message.file)) {
+        await downloadMediaFromURLToFile(message.file, filePath, options);
+        return;
+      }
+
       const size = statSync(message.file).size;
       if (maxBytes && size > maxBytes) {
         throw createMediaTooLargeError(maxBytes, size);

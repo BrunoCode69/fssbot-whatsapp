@@ -2,10 +2,16 @@ import { describe, expect, test } from 'bun:test';
 import { GatewayIntentBits } from 'discord.js';
 import {
   ButtonMessage,
+  FileMessage,
   ListMessage,
   PollMessage,
   TextMessage,
 } from '../src/messages';
+import Client from '../src/client/Client';
+import { BotStatus } from '../src/bot/BotStatus';
+import { promises as fsp } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   DiscordBot,
   buildDiscordPayload,
@@ -85,5 +91,108 @@ describe('DiscordIntents e buildDiscordPayload', () => {
     expect(bot.discord).toBeDefined();
     const txt = new TextMessage('999', 'Olá Discord');
     expect(buildDiscordPayload(txt).content).toBe('Olá Discord');
+  });
+  test('convertIncomingMessage e Client.downloadMediaToFile baixam anexos .ehi do Discord sem ENOENT', async () => {
+    const ehiBytes = Buffer.from([0x00, 0x04, 0x45, 0x48, 0x49, 0x21, 0xaa, 0xbb, 0xcc, 0xdd]);
+    const server = Bun.serve({
+      port: 0,
+      fetch() {
+        return new Response(ehiBytes, {
+          headers: {
+            'content-type': 'application/octet-stream',
+            'content-length': String(ehiBytes.length),
+          },
+        });
+      },
+    });
+    const fileUrl = `http://127.0.0.1:${server.port}/attachments/123/456/TIM_EXPIRADO_2.ehi?ex=abc`;
+    const tmpFile = path.join(os.tmpdir(), `rompot-discord-ehi-${Date.now()}.bin`);
+
+    try {
+      const bot = new DiscordBot({ intents: ['Guilds', 'GuildMessages'] });
+      bot.status = BotStatus.Online;
+      const client = new Client(bot);
+
+      const fakeDiscordMsg: any = {
+        id: '1999888777',
+        content: '/decrypt',
+        channelId: '777666555',
+        createdTimestamp: Date.now(),
+        channel: { id: '777666555', name: 'geral', isDMBased: () => false, isThread: () => false },
+        guild: { id: '111222333', name: 'Servidor Teste', memberCount: 10 },
+        author: { id: '444555666', username: 'bruno', tag: 'bruno#0001', bot: false },
+        member: null,
+        mentions: { users: new Map() },
+        attachments: {
+          first: () => ({
+            url: fileUrl,
+            proxyURL: fileUrl,
+            name: 'TIM_EXPIRADO_2.ehi',
+            contentType: 'application/octet-stream',
+            size: ehiBytes.length,
+          }),
+        },
+        stickers: { first: () => undefined },
+      };
+
+      const rompotMsg = await (bot as any).convertIncomingMessage(fakeDiscordMsg);
+      expect(rompotMsg).toBeInstanceOf(FileMessage);
+      expect(typeof (rompotMsg as any).file).toBe('object');
+      expect((rompotMsg as any).file.stream.url).toBe(fileUrl);
+      expect((rompotMsg as any).name).toBe('TIM_EXPIRADO_2.ehi');
+
+      await client.downloadMediaToFile(rompotMsg as any, tmpFile, { maxBytes: 1024 * 1024 });
+      const saved = await fsp.readFile(tmpFile);
+      expect(Buffer.compare(saved, ehiBytes)).toBe(0);
+
+      const streamed = await client.downloadStreamMessage(rompotMsg as any, { maxBytes: 1024 * 1024 });
+      expect(Buffer.compare(streamed, ehiBytes)).toBe(0);
+
+      await expect(
+        client.downloadMediaToFile(rompotMsg as any, tmpFile, { maxBytes: 4 }),
+      ).rejects.toThrow(/limite/i);
+    } finally {
+      server.stop(true);
+      await fsp.rm(tmpFile, { force: true }).catch(() => {});
+    }
+  });
+
+  test('handleInteraction converte slash command com anexo em FileMessage com slashOptions', async () => {
+    const bot = new DiscordBot({ intents: ['Guilds'] });
+    let emittedMsg: any = null;
+    bot.on('message', (m) => { emittedMsg = m; });
+
+    await (bot as any).handleInteraction({
+      id: '987654321',
+      channelId: '777666555',
+      createdTimestamp: Date.now(),
+      channel: { id: '777666555', name: 'geral', isDMBased: () => false, isThread: () => false },
+      guild: { id: '111222333', name: 'Servidor' },
+      user: { id: '444555666', username: 'bruno' },
+      member: null,
+      isChatInputCommand: () => true,
+      isButton: () => false,
+      isAnySelectMenu: () => false,
+      isModalSubmit: () => false,
+      commandName: 'decrypt',
+      options: {
+        data: [{
+          name: 'arquivo',
+          type: 11,
+          attachment: {
+            url: 'https://cdn.discordapp.com/attachments/1/2/TIM_EXPIRADO_2.ehi',
+            name: 'TIM_EXPIRADO_2.ehi',
+            contentType: 'application/octet-stream',
+            size: 128,
+          },
+        }],
+        getSubcommand: () => null,
+      },
+    });
+
+    expect(emittedMsg).toBeInstanceOf(FileMessage);
+    expect(emittedMsg.text).toBe('/decrypt');
+    expect(emittedMsg.name).toBe('TIM_EXPIRADO_2.ehi');
+    expect(emittedMsg.extra?.slashOptions?.arquivo).toBeInstanceOf(FileMessage);
   });
 });

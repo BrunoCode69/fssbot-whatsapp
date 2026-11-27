@@ -1,4 +1,6 @@
-import { statSync } from 'fs';
+import { createWriteStream, statSync } from 'fs';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { unlink } from 'fs/promises';
 import { Transform } from 'stream';
 import Long from 'long';
@@ -157,4 +159,130 @@ export function getExtensionFromMimetype(mimetype?: string): string {
 export function getDefaultMediaFileName(mimetype?: string, base: string = 'document'): string {
   const ext = getExtensionFromMimetype(mimetype);
   return ext ? `${base}.${ext}` : base;
+}
+
+
+/** Verifica se o valor é uma URL HTTP/HTTPS. */
+export function isHttpUrl(value: any): value is string {
+  return typeof value === 'string' && new RegExp('^https?://', 'i').test(value.trim());
+}
+
+async function openHttpMediaDownload(
+  url: string,
+  options: MediaDownloadOptions = {},
+  sourceLabel?: string,
+) {
+  const controller = new AbortController();
+  const signal = options.signal;
+  const abort = () => controller.abort((signal as any)?.reason);
+  const timeoutMs = Number(options.timeoutMs || 0);
+
+  if (signal) {
+    if (signal.aborted) abort();
+    else signal.addEventListener('abort', abort, { once: true });
+  }
+
+  const timer = timeoutMs > 0
+    ? setTimeout(
+        () => controller.abort(new Error(`Tempo esgotado ao baixar a mídia (${timeoutMs} ms).`)),
+        timeoutMs,
+      )
+    : undefined;
+
+  const cleanup = () => {
+    if (timer) clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+  };
+
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      const fromLabel = sourceLabel ? ` do ${sourceLabel}` : '';
+      throw new Error(`Falha ao baixar a mídia${fromLabel} (HTTP ${response.status}).`);
+    }
+
+    const maxBytes = getMediaMaxBytes(options);
+    const length = toMediaNumber(response.headers.get('content-length'));
+
+    if (maxBytes && length > maxBytes) {
+      await response.body?.cancel().catch(() => {});
+      throw createMediaTooLargeError(maxBytes, length);
+    }
+
+    return { response, maxBytes, cleanup };
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+}
+
+async function* readHttpBody(response: Response): AsyncGenerator<Uint8Array> {
+  if (!response.body) return;
+
+  const reader = response.body.getReader();
+  let done = false;
+
+  try {
+    while (true) {
+      const result = await reader.read();
+      if (result.done) {
+        done = true;
+        return;
+      }
+      if (result.value?.byteLength) yield result.value;
+    }
+  } finally {
+    if (!done) await reader.cancel().catch(() => {});
+  }
+}
+
+/** Baixa uma URL HTTP/HTTPS para Buffer aplicando maxBytes, signal e timeoutMs. */
+export async function downloadMediaFromURL(
+  url: string,
+  options?: MediaDownloadOptions,
+  sourceLabel?: string,
+): Promise<Buffer> {
+  const download = await openHttpMediaDownload(url, options || {}, sourceLabel);
+  try {
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+
+    for await (const chunk of readHttpBody(download.response)) {
+      total += chunk.byteLength;
+      if (download.maxBytes && total > download.maxBytes) {
+        throw createMediaTooLargeError(download.maxBytes);
+      }
+      chunks.push(chunk);
+    }
+
+    return Buffer.concat(chunks);
+  } finally {
+    download.cleanup();
+  }
+}
+
+/** Baixa uma URL HTTP/HTTPS em stream direto para filePath; remove arquivo parcial em falha. */
+export async function downloadMediaFromURLToFile(
+  url: string,
+  filePath: string,
+  options: MediaDownloadOptions = {},
+  sourceLabel?: string,
+): Promise<void> {
+  try {
+    const download = await openHttpMediaDownload(url, options, sourceLabel);
+    try {
+      await pipeline(
+        Readable.from(readHttpBody(download.response)),
+        createByteLimitTransform(download.maxBytes),
+        createWriteStream(filePath),
+      );
+    } finally {
+      download.cleanup();
+    }
+  } catch (error) {
+    await removeFileQuietly(filePath);
+    throw error;
+  }
 }

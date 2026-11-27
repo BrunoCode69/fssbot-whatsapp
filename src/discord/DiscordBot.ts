@@ -40,6 +40,7 @@ import Message, { MessageType } from '../messages/Message';
 import PollMessage, { PollAction } from '../messages/PollMessage';
 import PollUpdateMessage from '../messages/PollUpdateMessage';
 import ReactionMessage from '../messages/ReactionMessage';
+import StickerMessage from '../messages/StickerMessage';
 import TextMessage from '../messages/TextMessage';
 import VideoMessage from '../messages/VideoMessage';
 import Call from '../models/Call';
@@ -49,7 +50,34 @@ import ChatType from '../modules/chat/ChatType';
 import User from '../modules/user/User';
 import type UserAction from '../modules/user/UserAction';
 import type UserEvent from '../modules/user/UserEvent';
+import {
+  type MediaDownloadOptions,
+  createMediaTooLargeError,
+  downloadMediaFromURL,
+  downloadMediaFromURLToFile,
+  getMediaMaxBytes,
+  isHttpUrl,
+  toMediaNumber,
+} from '../utils/MediaUtils';
 import { resolveDiscordIntents } from './DiscordIntents';
+
+const SLASH_OPTION_TYPES: Record<string, number> = {
+  subcommand: 1, sub_command: 1, subcommand_group: 2, sub_command_group: 2,
+  string: 3, text: 3, integer: 4, int: 4, boolean: 5, bool: 5,
+  user: 6, channel: 7, role: 8, mentionable: 9, number: 10, float: 10, attachment: 11, file: 11,
+};
+
+function normalizeSlashOption(opt: any): any {
+  if (!opt || typeof opt !== 'object') return opt;
+  const numericType = typeof opt.type === 'number'
+    ? opt.type
+    : SLASH_OPTION_TYPES[String(opt.type ?? 'string').trim().toLowerCase()] ?? 3;
+  return {
+    ...opt,
+    type: numericType,
+    ...(Array.isArray(opt.options) ? { options: opt.options.map(normalizeSlashOption) } : {}),
+  };
+}
 
 export interface DiscordBotOptions {
   intents?: string[] | number | null;
@@ -579,46 +607,43 @@ export default class DiscordBot extends BotEvents implements IBot {
     if (interaction.isChatInputCommand()) {
       const optionsMap: Record<string, any> = {};
       const argParts: string[] = [];
+      let firstSlashAttachment: any = null;
+      const baseSlashExtra = { ...guildMeta, isSlashCommand: true, commandName: interaction.commandName };
+      const collectOption = (opt: any) => {
+        if (opt?.attachment) {
+          if (!firstSlashAttachment) firstSlashAttachment = opt.attachment;
+          optionsMap[opt.name] = this.buildAttachmentMediaMessage(chat, '', opt.attachment, {
+            id: interactionId, user, fromMe: false, timestamp: Math.floor(interaction.createdTimestamp / 1000), extra: baseSlashExtra,
+          });
+          return;
+        }
+        optionsMap[opt.name] = opt.value ?? '';
+        if (opt.value !== undefined) argParts.push(String(opt.value));
+      };
       for (const opt of interaction.options.data) {
         if (opt.type === 1 || opt.type === 2) {
           for (const subOpt of opt.options || []) {
-            optionsMap[subOpt.name] = subOpt.value ?? '';
-            if (subOpt.value !== undefined) argParts.push(String(subOpt.value));
+            if (subOpt.type === 1 && Array.isArray(subOpt.options)) {
+              for (const leafOpt of subOpt.options) collectOption(leafOpt);
+            } else collectOption(subOpt);
           }
-        } else {
-          optionsMap[opt.name] = opt.value ?? '';
-          if (opt.value !== undefined) argParts.push(String(opt.value));
-        }
+        } else collectOption(opt);
+      }
+      if (!firstSlashAttachment) {
+        firstSlashAttachment = (interaction.options as any)?.resolved?.attachments?.first?.() || null;
       }
       const subcommand = interaction.options.getSubcommand(false) || undefined;
-      const commandText = `/${interaction.commandName}${argParts.length ? ` ${argParts.join(' ')}` : ''}`;
-
+      const commandText = "/" + interaction.commandName + (argParts.length ? " " + argParts.join(" ") : "");
+      const slashExtra = { ...baseSlashExtra, subcommand, slashOptions: optionsMap };
       this.scheduleAutoDefer(interactionId, interaction, 'reply');
       this.emit('discord-interaction', {
-        interactionId,
-        kind: 'slash',
-        commandName: interaction.commandName,
-        subcommand,
-        options: optionsMap,
-        ...guildMeta,
-        chat,
-        user,
-        raw: interaction,
+        interactionId, kind: 'slash', commandName: interaction.commandName, subcommand, options: optionsMap,
+        ...guildMeta, chat, user, raw: interaction,
       });
-
-      const msg = new TextMessage(chat, commandText, {
-        id: interactionId,
-        user,
-        fromMe: false,
-        timestamp: Math.floor(interaction.createdTimestamp / 1000),
-        extra: {
-          ...guildMeta,
-          isSlashCommand: true,
-          commandName: interaction.commandName,
-          subcommand,
-          slashOptions: optionsMap,
-        },
-      });
+      const ts = Math.floor(interaction.createdTimestamp / 1000);
+      const msg = firstSlashAttachment
+        ? this.buildAttachmentMediaMessage(chat, commandText, firstSlashAttachment, { id: interactionId, user, fromMe: false, timestamp: ts, extra: slashExtra })
+        : new TextMessage(chat, commandText, { id: interactionId, user, fromMe: false, timestamp: ts, extra: slashExtra });
       this.emit('message', msg);
       return;
     }
@@ -718,6 +743,34 @@ export default class DiscordBot extends BotEvents implements IBot {
     (timer as any).unref?.();
   }
 
+  private buildAttachmentMediaMessage(
+    chat: Chat,
+    text: string,
+    att: any,
+    base: { id: string; user: User; mentions?: string[]; fromMe?: boolean; timestamp: number; extra?: Record<string, any> },
+  ): MediaMessage {
+    const url = String(att?.url || att?.proxyURL || '');
+    const proxyURL = String(att?.proxyURL || '');
+    const name = String(att?.name || 'file');
+    const mime = String(att?.contentType || 'application/octet-stream');
+    const size = toMediaNumber(att?.size);
+    const width = toMediaNumber(att?.width);
+    const height = toMediaNumber(att?.height);
+    const duration = toMediaNumber(att?.duration);
+    const media: Media = {
+      stream: { url, proxyURL, name, contentType: mime, mimetype: mime, size, width, height, duration },
+    };
+    const common = {
+      ...base, file: media, name, mimetype: mime, size, width, height, duration,
+      isGIF: mime === 'image/gif',
+      extra: { ...(base.extra || {}), url, proxyURL },
+    };
+    if (mime.startsWith('image/')) return new ImageMessage(chat, text, media, common as any);
+    if (mime.startsWith('video/')) return new VideoMessage(chat, text, media, common as any);
+    if (mime.startsWith('audio/')) return new AudioMessage(chat, media, common as any);
+    return new FileMessage(chat, text, media, common as any);
+  }
+
   private async convertIncomingMessage(dMsg: DiscordJSMessage, depth: number = 0): Promise<Message> {
     const chat = this.toRompotChat(dMsg.channel, dMsg.guild);
     const user = this.toRompotUser(dMsg.author, dMsg.member);
@@ -728,41 +781,30 @@ export default class DiscordBot extends BotEvents implements IBot {
       userTag: String(dMsg.author?.tag || dMsg.author?.username || ''),
       threadId: dMsg.channel?.isThread?.() ? String(dMsg.channelId) : '',
     };
-
-    const firstAtt = dMsg.attachments.first();
+    const timestamp = Math.floor(dMsg.createdTimestamp / 1000);
+    const fromMe = Boolean(dMsg.author?.id && this.id && String(dMsg.author.id) === String(this.id));
+    const firstAtt = dMsg.attachments?.first?.();
+    const firstSticker = !firstAtt ? dMsg.stickers?.first?.() : undefined;
     let rompotMsg: Message;
     if (firstAtt) {
-      const mime = String(firstAtt.contentType || 'application/octet-stream');
-      const common = {
-        id: String(dMsg.id),
-        user,
-        mentions,
-        timestamp: Math.floor(dMsg.createdTimestamp / 1000),
-        file: firstAtt.url,
-        name: firstAtt.name || 'file',
-        mimetype: mime,
-        size: firstAtt.size || 0,
-        extra: { ...baseExtra, url: firstAtt.url },
+      rompotMsg = this.buildAttachmentMediaMessage(chat, String(dMsg.content || ''), firstAtt, {
+        id: String(dMsg.id), user, mentions, fromMe, timestamp, extra: baseExtra,
+      });
+    } else if (firstSticker?.url) {
+      const stickerUrl = String(firstSticker.url);
+      const stickerName = String(firstSticker.name || 'sticker') + '.png';
+      const stickerMedia: Media = {
+        stream: { url: stickerUrl, name: stickerName, contentType: 'image/png', mimetype: 'image/png' },
       };
-      if (mime.startsWith('image/')) {
-        rompotMsg = new ImageMessage(chat, String(dMsg.content || ''), firstAtt.url, common as any);
-      } else if (mime.startsWith('video/')) {
-        rompotMsg = new VideoMessage(chat, String(dMsg.content || ''), firstAtt.url, common as any);
-      } else if (mime.startsWith('audio/')) {
-        rompotMsg = new AudioMessage(chat, firstAtt.url, common as any);
-      } else {
-        rompotMsg = new FileMessage(chat, String(dMsg.content || ''), firstAtt.url, { ...common, name: firstAtt.name || 'file' } as any);
-      }
+      rompotMsg = new StickerMessage(chat, stickerMedia, {
+        id: String(dMsg.id), user, mentions, fromMe, timestamp, name: stickerName, mimetype: 'image/png',
+        extra: { ...baseExtra, url: stickerUrl },
+      } as any);
     } else {
       rompotMsg = new TextMessage(chat, String(dMsg.content || ''), {
-        id: String(dMsg.id),
-        user,
-        mentions,
-        timestamp: Math.floor(dMsg.createdTimestamp / 1000),
-        extra: baseExtra,
+        id: String(dMsg.id), user, mentions, fromMe, timestamp, extra: baseExtra,
       });
     }
-
     if (depth < 1 && dMsg.reference?.messageId) {
       try {
         const refMsg = await dMsg.fetchReference();
@@ -842,6 +884,10 @@ export default class DiscordBot extends BotEvents implements IBot {
       }
     }
 
+    if (message.mention?.id && !message.mention?.extra?.isSlashCommand && !payload.reply) {
+      payload.reply = { messageReference: String(message.mention.id), failIfNotExists: false };
+    }
+
     const channel = await this.fetchSendableChannel(String(message.chat?.id || ''));
     const sent = await channel.send(payload);
     return new Message(message.chat, String(sent.content || message.text || ''), {
@@ -854,22 +900,29 @@ export default class DiscordBot extends BotEvents implements IBot {
   private async preparePayloadWithMedia(message: Message): Promise<Record<string, any>> {
     const payload = buildDiscordPayload(message);
     if (
-      message instanceof ImageMessage
-      || message instanceof VideoMessage
-      || message instanceof AudioMessage
-      || message instanceof FileMessage
-      || message.type === MessageType.Image
-      || message.type === MessageType.Video
-      || message.type === MessageType.Audio
-      || message.type === MessageType.File
+      message instanceof ImageMessage || message instanceof VideoMessage || message instanceof AudioMessage
+      || message instanceof FileMessage || message instanceof StickerMessage
+      || message.type === MessageType.Image || message.type === MessageType.Video || message.type === MessageType.Audio
+      || message.type === MessageType.File || message.type === MessageType.Sticker
     ) {
       const mediaMsg = message as MediaMessage;
-      const source = typeof mediaMsg.getStream === 'function'
-        ? await mediaMsg.getStream().catch(() => mediaMsg.file || message.extra?.url)
-        : (mediaMsg.file || message.extra?.url);
+      const fallbackSource = Buffer.isBuffer(mediaMsg.file) || typeof mediaMsg.file === 'string'
+        ? mediaMsg.file
+        : DiscordBot.extractMediaUrl(mediaMsg.file) || message.extra?.url;
+      const source = Buffer.isBuffer(mediaMsg.file)
+        ? mediaMsg.file
+        : typeof mediaMsg.getStream === 'function'
+          ? await mediaMsg.getStream().catch(() => fallbackSource)
+          : fallbackSource;
       if (source) {
-        const fileName = (mediaMsg as any).name || (message.type === MessageType.Image ? 'image.png' : message.type === MessageType.Video ? 'video.mp4' : message.type === MessageType.Audio ? 'audio.mp3' : 'file.bin');
-        payload.files = [...(payload.files || []), new AttachmentBuilder(source, { name: String(fileName) })];
+        const defaultName = message.type === MessageType.Image ? 'image.png'
+          : message.type === MessageType.Sticker ? 'sticker.png'
+          : message.type === MessageType.Video ? 'video.mp4'
+          : message.type === MessageType.Audio ? 'audio.mp3'
+          : 'file.bin';
+        const fileName = (mediaMsg as any).name || defaultName;
+        payload.files = [...(payload.files || []), new AttachmentBuilder(source as any, { name: String(fileName) })];
+        if (payload.content === '​' && !message.text) delete payload.content;
       }
       if ((mediaMsg as any).caption && !payload.content) {
         payload.content = String((mediaMsg as any).caption).slice(0, 2000);
@@ -959,11 +1012,35 @@ export default class DiscordBot extends BotEvents implements IBot {
 
   public async readMessage(_message: Message): Promise<void> {}
 
-  public async downloadStreamMessage(media: Media): Promise<Buffer> {
-    const url = String((media as any)?.extra?.url || (media as any)?.file || '');
-    if (!url.startsWith('http')) return Buffer.alloc(0);
-    const res = await fetch(url);
-    return Buffer.from(await res.arrayBuffer());
+  private static extractMediaUrl(media: any): string {
+    if (!media) return '';
+    if (typeof media === 'string') return isHttpUrl(media) ? media.trim() : '';
+    const candidate = media?.stream?.url || media?.stream?.proxyURL
+      || (typeof media?.stream === 'string' ? media.stream : '')
+      || media?.extra?.url || media?.extra?.proxyURL
+      || (typeof media?.file === 'string' ? media.file : media?.file?.stream?.url || media?.file?.stream?.proxyURL)
+      || '';
+    return isHttpUrl(candidate) ? String(candidate).trim() : '';
+  }
+
+  private static assertDeclaredMediaSize(media: any, options?: MediaDownloadOptions): void {
+    const maxBytes = getMediaMaxBytes(options);
+    const declaredSize = toMediaNumber(media?.stream?.size ?? media?.size);
+    if (maxBytes && declaredSize > maxBytes) throw createMediaTooLargeError(maxBytes, declaredSize);
+  }
+
+  public async downloadStreamMessage(media: Media, options?: MediaDownloadOptions): Promise<Buffer> {
+    const url = DiscordBot.extractMediaUrl(media);
+    if (!url) return Buffer.alloc(0);
+    DiscordBot.assertDeclaredMediaSize(media, options);
+    return await downloadMediaFromURL(url, options, 'Discord');
+  }
+
+  public async downloadMediaToFile(media: Media, filePath: string, options?: MediaDownloadOptions): Promise<void> {
+    const url = DiscordBot.extractMediaUrl(media);
+    if (!url) throw new Error('A mensagem não tem um arquivo do Discord para baixar.');
+    DiscordBot.assertDeclaredMediaSize(media, options);
+    await downloadMediaFromURLToFile(url, filePath, options, 'Discord');
   }
 
   public async getBotName(): Promise<string> {
@@ -1207,7 +1284,7 @@ export default class DiscordBot extends BotEvents implements IBot {
     const payload = commands.map((cmd) => ({
       name: String(cmd.name).replace(/^\/+/, '').toLowerCase().slice(0, 32),
       description: String(cmd.description || 'Comando').slice(0, 100),
-      options: Array.isArray(cmd.options) ? cmd.options : [],
+      options: Array.isArray(cmd.options) ? cmd.options.map(normalizeSlashOption) : [],
     }));
     if (guildId) {
       return await this.discord.application.commands.set(payload, String(guildId));

@@ -27,7 +27,8 @@ export default class ClientFunctionHandler<B extends IBot, T extends string> {
         await this.client.awaitConnectionOpen();
 
         return [await func.bind(this.client.bot)(...args), undefined];
-      } catch (error) {
+      } catch (error: any) {
+        if (error?.code === 'MEDIA_TOO_LARGE' || error?.name === 'AbortError') return [undefined, error];
         await new Promise((res) =>
           setTimeout(res, this.client.config.requestsDelay),
         );

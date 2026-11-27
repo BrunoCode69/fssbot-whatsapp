@@ -10,6 +10,7 @@ import Call from '../models/Call';
 import Chat from '../modules/chat/Chat';
 import ChatStatus from '../modules/chat/ChatStatus';
 import User from '../modules/user/User';
+import { type MediaDownloadOptions } from '../utils/MediaUtils';
 export interface DiscordBotOptions {
     intents?: string[] | number | null;
 }
@@ -37,6 +38,7 @@ export default class DiscordBot extends BotEvents implements IBot {
     private attachEvents;
     private handleInteraction;
     private scheduleAutoDefer;
+    private buildAttachmentMediaMessage;
     private convertIncomingMessage;
     connect(auth: IAuth | string): Promise<void>;
     reconnect(_alert?: boolean): Promise<void>;
@@ -53,7 +55,10 @@ export default class DiscordBot extends BotEvents implements IBot {
     pinMessage(message: Message): Promise<void>;
     unpinMessage(message: Message): Promise<void>;
     readMessage(_message: Message): Promise<void>;
-    downloadStreamMessage(media: Media): Promise<Buffer>;
+    private static extractMediaUrl;
+    private static assertDeclaredMediaSize;
+    downloadStreamMessage(media: Media, options?: MediaDownloadOptions): Promise<Buffer>;
+    downloadMediaToFile(media: Media, filePath: string, options?: MediaDownloadOptions): Promise<void>;
     getBotName(): Promise<string>;
     setBotName(name: string): Promise<void>;
     getBotDescription(): Promise<string>;
